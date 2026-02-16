@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SRT 한글→일어 교체 (클릭삽입/빈줄제거/숫자줄분리/특수구간)</title>
+  <title>SRT 한글→일어 교체 (SRT 타이밍 고정)</title>
 
   <style>
     :root { --gap: 14px; }
@@ -43,7 +43,6 @@
     .status b{ font-weight:900; }
 
     .cfg{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .cfg input[type="number"]{ width:90px; padding:6px 8px; border-radius:10px; border:1px solid #ccc; }
     .cfg input[type="checkbox"]{ transform: translateY(1px); }
 
     .pill{
@@ -54,8 +53,9 @@
     .grid{
       margin-top:var(--gap);
       display:grid; grid-template-columns:1.15fr 0.85fr; gap:var(--gap);
+      /* ✅ 박스 높이 더 길게 */
       height: calc(100vh - 255px);
-      min-height: 800px;
+      min-height: 520px;
     }
     .panel{
       border:1px solid #e5e5e5; border-radius:12px; overflow:hidden;
@@ -73,6 +73,7 @@
       width:100%; min-height:180px; padding:10px; border-radius:10px; border:1px solid #ccc;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       line-height:1.45;
+      box-sizing:border-box;
     }
 
     table{
@@ -92,13 +93,13 @@
     .ok{ color:#0a7; font-weight:900; }
     .bad{ color:#c00; font-weight:900; }
 
-    /* === 요청: 테이블 폭 조정 === */
-    th.colIdx, td.colIdx { width: 40px; }
-    th.colTime, td.colTime { width: 110px; }
-    td.colTime { font-size: 11.5px; } /* 1~2pt 작게 */
-    th.colKo, td.colKo { width: 360px; }
-    th.colJp, td.colJp { width: 360px; }
-    th.colStat, td.colStat { width: 120px; }
+    /* ✅ 요청: 테이블 폭 조정 */
+    th.colIdx, td.colIdx { width: 40px; }        /* # : 2자리 느낌 */
+    th.colTime, td.colTime { width: 110px; }     /* 시간: 기존 대비 축소 */
+    td.colTime { font-size: 11.5px; }            /* 시간 글씨 1~2pt 작게 */
+    th.colKo, td.colKo { width: 360px; }         /* 원문: 치환과 비슷한 폭 */
+    th.colJp, td.colJp { width: 360px; }         /* 치환 */
+    th.colStat, td.colStat { width: 120px; }     /* 상태 */
 
     .jpEdit{
       width:100%;
@@ -138,7 +139,6 @@
 
     .findBox{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .findBox input{ width:220px; padding:6px 10px; border-radius:10px; border:1px solid #ccc; }
-    mark{ padding:0 2px; border-radius:4px; }
 
     .smallNote{ font-size:12px; color:#666; line-height:1.35; margin-top:8px; }
   </style>
@@ -147,12 +147,14 @@
 </head>
 
 <body>
-  <h2>SRT 한글 → 일본어 자동 교체 (DOCX 기반)</h2>
+  <h2>SRT 한글 → 일본어 자동 교체 (SRT 타이밍 고정)</h2>
   <div class="hint">
-    - 오른쪽 DOCX는 <b>줄 클릭</b>으로 왼쪽 치환칸에 삽입 (드래그 안 씀)<br/>
+    - ✅ <b>SRT가 나눈 블록(시간/번호) 그대로 유지</b>하고, 각 블록 한글에 해당하는 DOCX 일본어를 넣습니다.<br/>
+    - 오른쪽 DOCX는 <b>줄 클릭</b>으로 왼쪽 치환칸에 삽입(드래그 안 씀).<br/>
     - <b>일어–일어 사이 빈 줄 제거</b> + 삽입 시에도 <b>빈 줄 일괄 제거</b><br/>
     - <b>숫자+문장(예: 43 こうして…)</b>은 오른쪽에서 자동으로 <b>숫자/본문 줄 분리</b><br/>
-    - “제목(한글)” 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력
+    - “제목(한글)” 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력<br/>
+    - 숫자만 블록(1,2,3...)은 <b>[오프닝 멘트] 이전까지만</b> DOCX 원고(1 〜)로 대체
   </div>
 
   <div class="topbar">
@@ -179,19 +181,6 @@
 
     <div class="col" style="min-width: 440px;">
       <div class="cfg">
-        <span class="pill">문장 병합 최대 블록</span>
-        <input id="maxSentenceMerge" type="number" min="2" max="40" value="12" />
-
-        <span class="pill">도입문 자동 병합</span>
-        <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
-          <input id="mergeIntro" type="checkbox" checked /> ON
-        </label>
-
-        <span class="pill">문장 끝(마침표) 우선</span>
-        <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
-          <input id="preferSentenceEnd" type="checkbox" checked /> ON
-        </label>
-
         <span class="pill">[オープニングコメント] 제거</span>
         <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
           <input id="dropOpeningLabel" type="checkbox" checked /> ON
@@ -215,19 +204,12 @@
       <div class="panelHeader">
         <div>
           <div class="title">결과(왼쪽)</div>
-          <div class="small">상단: 최종 SRT / 하단: 매칭 상세(일본어 편집 가능)</div>
+          <div class="small">상단: 최종 SRT / 하단: 매칭 상세(일본어 편집 가능, 편집 시 OK로 변경)</div>
         </div>
         <div class="small" id="leftStat"></div>
       </div>
 
       <div class="panelBody">
-        <label style="margin:0 0 6px;">최종 SRT 미리보기 (다운로드 기준)</label>
-        <textarea id="outSrt" spellcheck="false" placeholder="변환 실행 후 결과가 표시됩니다."></textarea>
-
-        <div class="smallNote">
-          팁: 표의 일본어 편집칸을 클릭해 둔 뒤, 오른쪽 DOCX에서 <b>일본어 줄을 클릭</b>하면 자동 삽입됩니다.
-          (기존 값 있으면 <b>아래줄로 추가</b>)
-        </div>
 
         <div class="pill" style="margin-top:12px;">매칭 상세 (행 클릭 → 오른쪽 DOCX 하이라이트/이동)</div>
 
@@ -237,7 +219,7 @@
               <tr>
                 <th class="colIdx">#</th>
                 <th class="colTime">시간</th>
-                <th class="colKo">원문(한글, 병합됨)</th>
+                <th class="colKo">원문(한글)</th>
                 <th class="colJp">치환(일본어, 편집)</th>
                 <th class="colStat">상태</th>
               </tr>
@@ -276,13 +258,15 @@
   let srtText = "";
   let docxTextRaw = "";
 
-  // ✅ 다운로드 파일명 생성용 (SRT에서 8자리 날짜 추출)
+  // ✅ 다운로드 파일명 생성용
   let srtFileNameBase = "output";
 
   let lastBlocks = [];
   let lastReport = [];
 
+  // 제목/본문(본문=성경구절) 추출
   let docTitleExtract = { title: "", passage: "" };
+  // 오프닝 이전 숫자 원고(1 〜) 추출
   let docManuscriptMap = new Map();
 
   let docxViewLines = [];
@@ -349,28 +333,6 @@
 
   function normalizeTimeLine(t) { return (t || "").trim(); }
 
-  function splitTimeRange(timeLine) {
-    const parts = timeLine.split("-->").map(s => s.trim());
-    return { start: parts[0] || "", end: parts[1] || "" };
-  }
-
-  function looksSentenceEnded(rawText) {
-    const s = (rawText || "").trim();
-    if (!s) return false;
-    const tail = s.replace(/[”"'\s]+$/g, "");
-    return /[\.。\!\?…]+$/.test(tail);
-  }
-
-  function isIntroVerseLine(koMergedRaw) {
-    const s = (koMergedRaw || "").replace(/\s+/g, " ").trim();
-    if (!s) return false;
-    if (s.length > 40) return false;
-    const hasChapVerse = /(\d+)\s*장.*?(\d+)\s*절/.test(s);
-    if (!hasChapVerse) return false;
-    const hasCue = /(을|를)\s*보(면|시?면)|을\s*보라|를\s*보라|을\s*살펴보면|를\s*살펴보면/.test(s);
-    return hasCue || /을\s*보면,?$/.test(s) || /를\s*보면,?$/.test(s);
-  }
-
   function isNumericOnlyBody(body) {
     const s = (body || "").trim();
     return /^\d+$/.test(s);
@@ -394,20 +356,25 @@
     return noExt || "output";
   }
 
+  // ✅ SRT 파싱: idx/time/body 그대로 유지
   function parseSrt(text) {
     const blocks = text.replace(/\r/g, "").split(/\n\s*\n/);
     const items = [];
     for (const blk of blocks) {
       const lines = blk.split("\n");
       if (lines.length < 2) continue;
+
+      const idx = (lines[0] || "").trim();
       const time = normalizeTimeLine(lines[1] || "");
       const body = lines.slice(2).join("\n").trim();
+
       if (!time.includes("-->")) continue;
-      items.push({ time, body });
+      items.push({ idx: idx || String(items.length + 1), time, body });
     }
     return items;
   }
 
+  // ===== DOCX: title/passage extraction (タイトル / 本　　文) =====
   function extractTitleAndPassage(docRaw) {
     const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim()).filter(Boolean);
     let title = "";
@@ -421,7 +388,9 @@
         const m = s.match(/^タイトル\s*:\s*(.+)$/);
         if (m && m[1]) title = m[1].trim();
       }
+
       if (!passage) {
+        // "本文:" or "本　　文:" (공백/전각공백 허용)
         let m = s.match(/^本文\s*:\s*(.+)$/);
         if (!m || !m[1]) m = s.match(/^本[\s　]*文\s*:\s*(.+)$/);
         if (m && m[1]) passage = m[1].trim();
@@ -429,9 +398,11 @@
 
       if (title && passage) break;
     }
+
     return { title, passage };
   }
 
+  // ===== DOCX: extract manuscript numbered JP lines BEFORE opening marker in DOCX =====
   function extractManuscriptNumberedJP(docRaw) {
     const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim());
     const map = new Map();
@@ -440,6 +411,7 @@
       const ln = lines[i];
       if (!ln) continue;
 
+      // DOCX에서 오프닝 멘트 등장하면 그 이전까지만 원고숫자 사용
       if (hasHangul(ln) && isOpeningMarker(ln)) break;
 
       const m = ln.match(/^(\d{1,3})\s+(.+)$/);
@@ -464,6 +436,7 @@
     return map;
   }
 
+  // ===== KO->JP dict build =====
   function stripJpLabels(jpLines, dropOpeningLabel) {
     const out = [];
     for (let ln of jpLines) {
@@ -502,6 +475,7 @@
     return map;
   }
 
+  // ===== TEXT CLEAN: remove blank lines =====
   function removeBlankLinesAggressive(text) {
     const lines = (text || "").replace(/\r/g, "").split("\n");
     const out = [];
@@ -513,6 +487,10 @@
     return out.join("\n").trim();
   }
 
+  // ===== DOCX VIEW PREPROCESS =====
+  // 1) "43 こうして..." -> "43" + "こうして..." 분리
+  // 2) 일어-일어 사이 빈줄 제거
+  // 3) 한글로 넘어가기 직전엔 빈줄 1줄(구분)
   function buildDocxViewLines(docRaw) {
     const rawLines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trimEnd());
     const step1 = [];
@@ -521,6 +499,7 @@
       const ln = (ln0 || "").trim();
       if (!ln) { step1.push(""); continue; }
 
+      // 숫자+일어 라인 분리
       const m = ln.match(/^(\d{1,3})\s+(.+)$/);
       if (m) {
         const num = m[1];
@@ -541,19 +520,24 @@
       const next = (i + 1 < step1.length) ? (step1[i + 1] ?? "").trim() : "";
 
       if (!cur) {
+        // prev & next가 둘 다 일본어면 빈줄 제거
         if (prev && next && hasJapanese(prev) && hasJapanese(next)) continue;
+        // 연속 빈줄 제거
         if (out.length && out[out.length - 1] === "") continue;
         out.push("");
         continue;
       }
 
+      // JP -> KO로 넘어갈 때 KO 앞에 빈줄 1줄 보장
       if (hasHangul(cur) && prev && prev !== "" && hasJapanese(prev)) {
         if (out[out.length - 1] !== "") out.push("");
       }
 
+      // KO -> JP는 빈줄 없이 바로
       out.push(cur);
     }
 
+    // 끝 빈줄 제거
     while (out.length && out[out.length - 1] === "") out.pop();
     return out.map(t => ({ text: t, isBlank: t === "" }));
   }
@@ -619,6 +603,7 @@
     return bestLine;
   }
 
+  // ===== output rebuild =====
   function rebuildOutSrtFromBlocks() {
     const lines = [];
     for (let i = 0; i < lastBlocks.length; i++) {
@@ -633,7 +618,6 @@
     return srtOut;
   }
 
-  // ✅ OK/FAIL 카운트 갱신
   function refreshOkFailCounts() {
     let ok = 0, fail = 0;
     for (const r of lastReport) {
@@ -643,7 +627,6 @@
     setStatus(`변환 상태: <b>성공 ${ok}</b> / <b>실패 ${fail}</b> (치환칸 입력하면 자동 OK)`);
   }
 
-  // ✅ 특정 행의 상태 UI를 OK/FAIL로 즉시 반영
   function updateRowUIByIndex(i) {
     const tr = detailBody.querySelector(`tr[data-report-index="${i}"]`);
     if (!tr) return;
@@ -657,8 +640,8 @@
     if (!statTd) return;
 
     statTd.innerHTML = r.ok
-      ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">merge:${r.mergedFrom}${r.special ? " / " + r.special : ""}</div>`
-      : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">merge:${r.mergedFrom}${r.special ? " / " + r.special : ""}</div>`;
+      ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`
+      : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`;
   }
 
   function renderReport(report) {
@@ -686,8 +669,8 @@
         </td>
         <td class="colStat">
           ${r.ok
-            ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">merge:${r.mergedFrom}${r.special ? " / " + r.special : ""}</div>`
-            : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">merge:${r.mergedFrom}${r.special ? " / " + r.special : ""}</div>`
+            ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`
+            : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`
           }
         </td>
       `;
@@ -698,13 +681,14 @@
     refreshOkFailCounts();
   }
 
+  // textarea focus tracking
   detailBody.addEventListener("focusin", (e) => {
     const ta = e.target.closest("textarea.jpEdit");
     if (!ta) return;
     lastFocusedTextarea = ta;
   });
 
-  // ✅ 치환칸 입력 시: 내용 있으면 OK로 자동 변경 + 카운트 갱신
+  // ✅ 치환칸 입력 시 OK/FAIL 자동 변경 + 카운트 갱신
   detailBody.addEventListener("input", (e) => {
     const ta = e.target.closest("textarea.jpEdit");
     if (!ta) return;
@@ -714,11 +698,9 @@
 
     lastReport[idx].jpEdited = ta.value;
 
-    // ok/fail 판정: 입력칸에 실질 내용이 있으면 OK, 없으면 FAIL
     const hasText = (ta.value || "").trim().length > 0;
     lastReport[idx].ok = hasText;
 
-    // textarea fail 스타일도 동기화
     if (hasText) ta.classList.remove("fail");
     else ta.classList.add("fail");
 
@@ -727,6 +709,7 @@
     refreshOkFailCounts();
   });
 
+  // row click -> docx highlight
   detailBody.addEventListener("click", (e) => {
     const tr = e.target.closest("tr");
     if (!tr) return;
@@ -744,6 +727,7 @@
     highlightInDocx(anchor);
   });
 
+  // ===== RIGHT CLICK INSERT (doc line click -> textarea append) =====
   function insertToFocusedTextarea(text) {
     if (!lastFocusedTextarea) {
       setStatus(`<span style="color:#c00;font-weight:900;">주의:</span> 먼저 왼쪽 표에서 일본어 수정칸을 한 번 클릭해 주세요.`);
@@ -761,7 +745,6 @@
     if (Number.isFinite(idx) && lastReport[idx]) {
       lastReport[idx].jpEdited = nextVal;
 
-      // ✅ 삽입 후 OK로 전환
       const hasText = nextVal.trim().length > 0;
       lastReport[idx].ok = hasText;
 
@@ -786,157 +769,73 @@
     insertToFocusedTextarea(text);
   });
 
-  function convertAll(srtItems, ko2jp, opts) {
+  // ===== ✅ 핵심: SRT 타이밍/블록 그대로, 블록별 문장만 매칭 =====
+  function convertAll_SrtTimingFixed(srtItems, ko2jp) {
     const out = [];
     const report = [];
 
-    const MAX = Math.max(2, Math.min(40, Number(opts.maxSentenceMerge) || 12));
-    const preferSentenceEnd = !!opts.preferSentenceEnd;
-    const mergeIntro = !!opts.mergeIntro;
-
-    let i = 0;
-    let newIndex = 1;
     let srtOpeningSeen = false;
 
-    while (i < srtItems.length) {
-      const curBody = (srtItems[i].body || "").trim();
-      if (isOpeningMarker(curBody)) srtOpeningSeen = true;
+    for (let i = 0; i < srtItems.length; i++) {
+      const item = srtItems[i];
+      const koBodyRaw = (item.body || "").trim();
 
-      if (isTitleMarker(curBody)) {
-        const first = srtItems[i];
-        const t = splitTimeRange(first.time);
-        const newTime = `${t.start} --> ${t.end}`;
+      if (isOpeningMarker(koBodyRaw)) srtOpeningSeen = true;
 
+      // (A) 제목 블록
+      if (isTitleMarker(koBodyRaw)) {
         const title = (docTitleExtract.title || "").trim();
         const passage = (docTitleExtract.passage || "").trim();
         const jp = [title, passage].filter(Boolean).join("\n").trim();
 
-        const idx = String(newIndex++);
-        out.push({ idx, time: newTime, body: jp || curBody });
+        out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
         report.push({
-          idx, time: newTime,
-          ko: curBody,
+          idx: item.idx,
+          time: item.time,
+          ko: koBodyRaw,
           jp: jp || "",
           ok: !!jp,
-          mergedFrom: 1,
           special: "TITLE"
         });
-
-        i += 1;
         continue;
       }
 
-      if (!srtOpeningSeen && isNumericOnlyBody(curBody)) {
-        const num = Number(curBody);
+      // (B) 숫자만 블록: 오프닝 전까지만 원고숫자 대체
+      if (!srtOpeningSeen && isNumericOnlyBody(koBodyRaw)) {
+        const num = Number(koBodyRaw);
         const jp = docManuscriptMap.get(num) || "";
 
-        const first = srtItems[i];
-        const t = splitTimeRange(first.time);
-        const newTime = `${t.start} --> ${t.end}`;
-
-        const idx = String(newIndex++);
-        out.push({ idx, time: newTime, body: jp || curBody });
+        out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
         report.push({
-          idx, time: newTime,
-          ko: curBody,
+          idx: item.idx,
+          time: item.time,
+          ko: koBodyRaw,
           jp: jp || "",
           ok: !!jp,
-          mergedFrom: 1,
           special: "NUM"
         });
-
-        i += 1;
         continue;
       }
 
-      let mergedNorm = "";
-      let mergedRaw = "";
-      const candidates = [];
-      let firstSentenceEndLen = -1;
+      // (C) 일반 블록: "이 블록 한글"로만 매칭
+      const normKey1 = normalizeKo(koBodyRaw);
+      let jp = normKey1 ? (ko2jp.get(normKey1) || "") : "";
 
-      for (let k = 0; k < MAX && (i + k) < srtItems.length; k++) {
-        const partRaw = srtItems[i + k].body || "";
-        const partNorm = normalizeKo(partRaw);
-
-        mergedNorm += partNorm;
-        mergedRaw += (k === 0 ? "" : "\n") + partRaw;
-
-        const isEnd = looksSentenceEnded(partRaw);
-        if (isEnd && firstSentenceEndLen === -1) firstSentenceEndLen = k + 1;
-
-        candidates.push({
-          mergeLen: k + 1,
-          norm: mergedNorm,
-          raw: mergedRaw,
-          isSentenceEnd: isEnd
-        });
+      // 라벨형 한글(예: [오프닝 멘트] : ~~~) 보정
+      if (!jp) {
+        const normKey2 = normalizeKo(cleanKoKey(koBodyRaw));
+        if (normKey2) jp = ko2jp.get(normKey2) || "";
       }
 
-      const ordered = preferSentenceEnd
-        ? [...candidates].sort((a,b) => {
-            if (a.isSentenceEnd !== b.isSentenceEnd) return a.isSentenceEnd ? -1 : 1;
-            return a.mergeLen - b.mergeLen;
-          })
-        : candidates;
-
-      let bestMatch = null;
-      for (const c of ordered) {
-        if (c.norm && ko2jp.has(c.norm)) { bestMatch = { ...c, jp: ko2jp.get(c.norm) }; break; }
-      }
-
-      let outLen = bestMatch ? bestMatch.mergeLen : (firstSentenceEndLen !== -1 ? firstSentenceEndLen : 1);
-
-      if (mergeIntro) {
-        let rawKoNow = "";
-        for (let k = 0; k < outLen; k++) rawKoNow += (k===0?"":"\n") + (srtItems[i+k].body||"");
-        rawKoNow = rawKoNow.trim();
-
-        if (isIntroVerseLine(rawKoNow) && (i + outLen) < srtItems.length) {
-          const j = i + outLen;
-          let nextLen = 1;
-          for (let k = 0; k < MAX && (j + k) < srtItems.length; k++) {
-            if (looksSentenceEnded(srtItems[j + k].body || "")) { nextLen = k + 1; break; }
-            nextLen = k + 1;
-          }
-
-          let norm2 = normalizeKo(rawKoNow);
-          let rawKo2 = rawKoNow;
-
-          for (let k = 0; k < nextLen; k++) {
-            rawKo2 += "\n" + (srtItems[j + k].body || "");
-            norm2 += normalizeKo(srtItems[j + k].body || "");
-          }
-          rawKo2 = rawKo2.trim();
-
-          if (ko2jp.has(norm2)) {
-            bestMatch = { mergeLen: outLen + nextLen, jp: ko2jp.get(norm2), norm: norm2, raw: rawKo2 };
-            outLen = outLen + nextLen;
-          } else {
-            outLen = outLen + nextLen;
-          }
-        }
-      }
-
-      let rawKo = "";
-      for (let k = 0; k < outLen; k++) rawKo += (k===0?"":"\n") + (srtItems[i+k].body||"");
-      rawKo = rawKo.trim();
-
-      const first = srtItems[i];
-      const last = srtItems[i + outLen - 1];
-      const t1 = splitTimeRange(first.time);
-      const t2 = splitTimeRange(last.time);
-      const newTime = `${t1.start} --> ${t2.end}`;
-
-      const idx = String(newIndex++);
-      if (bestMatch && bestMatch.mergeLen === outLen) {
-        out.push({ idx, time: newTime, body: bestMatch.jp });
-        report.push({ idx, time: newTime, ko: rawKo, jp: bestMatch.jp, ok: true, mergedFrom: outLen });
-      } else {
-        out.push({ idx, time: newTime, body: rawKo });
-        report.push({ idx, time: newTime, ko: rawKo, jp: "", ok: false, mergedFrom: outLen });
-      }
-
-      i += outLen;
+      out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
+      report.push({
+        idx: item.idx,
+        time: item.time,
+        ko: koBodyRaw,
+        jp: jp || "",
+        ok: !!jp,
+        special: jp ? "" : "FAIL"
+      });
     }
 
     return { out, report };
@@ -1072,15 +971,10 @@
       const dropOpeningLabel = $("dropOpeningLabel").checked;
       const ko2jp = buildKoToJpMap(docxTextRaw, dropOpeningLabel);
 
-      const opts = {
-        maxSentenceMerge: $("maxSentenceMerge").value,
-        preferSentenceEnd: $("preferSentenceEnd").checked,
-        mergeIntro: $("mergeIntro").checked,
-      };
-
       setStatus(`처리 중... (SRT <b>${srtItems.length}</b> / KO→JP 사전 <b>${ko2jp.size}</b> / 원고숫자 <b>${docManuscriptMap.size}</b>)`);
 
-      const { out, report } = convertAll(srtItems, ko2jp, opts);
+      // ✅ SRT 타이밍 고정 변환
+      const { out, report } = convertAll_SrtTimingFixed(srtItems, ko2jp);
 
       lastBlocks = out;
       renderReport(report);
@@ -1095,8 +989,6 @@
   dlBtn.addEventListener("click", () => {
     const content = rebuildOutSrtFromBlocks();
     if (!content.trim()) return;
-
-    // ✅ 저장명 = SRT 숫자(YYYYMMDD)_jp.srt
     downloadText(`${srtFileNameBase}_jp.srt`, content);
   });
 
