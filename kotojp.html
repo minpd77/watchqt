@@ -3,13 +3,55 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SRT 한글→일어 교체 (SRT 타이밍 고정)</title>
+  <title>SRT 한글→일본어 교체 (SRT 타이밍 고정)</title>
 
   <style>
     :root { --gap: 14px; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
-    h2 { margin: 0 0 8px; }
+    h2 { margin: 0 0 8px; display:flex; align-items:center; gap:10px; }
     .hint { color:#666; font-size: 13px; line-height:1.45; }
+
+    /* help icon */
+    .helpBtn{
+      width:28px; height:28px; border-radius:999px;
+      border:1px solid #333; background:#fff; color:#111;
+      display:inline-flex; align-items:center; justify-content:center;
+      font-weight:900; cursor:pointer; user-select:none;
+    }
+    .helpBtn:hover{ background:#f2f2f2; }
+
+    /* modal */
+    .modalBackdrop{
+      position:fixed; inset:0;
+      background: rgba(0,0,0,.45);
+      display:none;
+      align-items:center; justify-content:center;
+      z-index:9999;
+      padding: 18px;
+    }
+    .modal{
+      width:min(780px, 96vw);
+      background:#fff;
+      border-radius:14px;
+      border:1px solid #e5e5e5;
+      box-shadow: 0 16px 40px rgba(0,0,0,.25);
+      overflow:hidden;
+    }
+    .modalHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px;
+      border-bottom:1px solid #eee;
+      background:#fcfcfc;
+      font-weight:900;
+    }
+    .modalClose{
+      border:1px solid #333; background:#fff; color:#111;
+      border-radius:10px; padding:6px 10px; cursor:pointer;
+      font-weight:800;
+    }
+    .modalBody{ padding:14px 16px; }
+    .modalBody ul{ margin:0; padding-left: 18px; }
+    .modalBody li{ margin: 8px 0; line-height:1.5; }
 
     .topbar{
       display:flex; gap:var(--gap); flex-wrap:wrap; align-items:flex-end;
@@ -53,9 +95,8 @@
     .grid{
       margin-top:var(--gap);
       display:grid; grid-template-columns:1.15fr 0.85fr; gap:var(--gap);
-      /* ✅ 박스 높이 더 길게 */
       height: calc(100vh - 255px);
-      min-height: 520px;
+      min-height: 800px;
     }
     .panel{
       border:1px solid #e5e5e5; border-radius:12px; overflow:hidden;
@@ -68,13 +109,6 @@
     .panelHeader .title{ font-weight:900; }
     .panelHeader .small{ font-size:12px; color:#666; }
     .panelBody{ padding:12px; overflow:auto; flex:1; }
-
-    textarea#outSrt{
-      width:100%; min-height:180px; padding:10px; border-radius:10px; border:1px solid #ccc;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      line-height:1.45;
-      box-sizing:border-box;
-    }
 
     table{
       width:100%;
@@ -93,13 +127,15 @@
     .ok{ color:#0a7; font-weight:900; }
     .bad{ color:#c00; font-weight:900; }
 
-    /* ✅ 요청: 테이블 폭 조정 */
-    th.colIdx, td.colIdx { width: 40px; }        /* # : 2자리 느낌 */
-    th.colTime, td.colTime { width: 110px; }     /* 시간: 기존 대비 축소 */
-    td.colTime { font-size: 11.5px; }            /* 시간 글씨 1~2pt 작게 */
-    th.colKo, td.colKo { width: 360px; }         /* 원문: 치환과 비슷한 폭 */
-    th.colJp, td.colJp { width: 360px; }         /* 치환 */
-    th.colStat, td.colStat { width: 120px; }     /* 상태 */
+    /* table width tuning (요청 반영) */
+th.colIdx, td.colIdx { width: 20px; }           /* # 칸: 50% */
+th.colTime, td.colTime { width: 77px; }         /* 시간 칸: 70% (110px -> 77px) */
+td.colTime { font-size: 8px; }                  /* 시간 숫자 텍스트: 70% (11.5px -> 약 8px) */
+
+th.colKo, td.colKo { width: 306px; }            /* 원문(한글): 85% (360px -> 306px) */
+th.colJp, td.colJp { width: 360px; }            /* 치환(일본어) 유지 */
+th.colStat, td.colStat { width: 120px; }        /* 상태 유지 */
+
 
     .jpEdit{
       width:100%;
@@ -147,14 +183,29 @@
 </head>
 
 <body>
-  <h2>SRT 한글 → 일본어 자동 교체 (SRT 타이밍 고정)</h2>
-  <div class="hint">
-    - ✅ <b>SRT가 나눈 블록(시간/번호) 그대로 유지</b>하고, 각 블록 한글에 해당하는 DOCX 일본어를 넣습니다.<br/>
-    - 오른쪽 DOCX는 <b>줄 클릭</b>으로 왼쪽 치환칸에 삽입(드래그 안 씀).<br/>
-    - <b>일어–일어 사이 빈 줄 제거</b> + 삽입 시에도 <b>빈 줄 일괄 제거</b><br/>
-    - <b>숫자+문장(예: 43 こうして…)</b>은 오른쪽에서 자동으로 <b>숫자/본문 줄 분리</b><br/>
-    - “제목(한글)” 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력<br/>
-    - 숫자만 블록(1,2,3...)은 <b>[오프닝 멘트] 이전까지만</b> DOCX 원고(1 〜)로 대체
+  <h2>
+    SRT 한글 → 일본어 자동 교체 (SRT 타이밍 고정)
+    <span id="helpBtn" class="helpBtn" title="도움말">?</span>
+  </h2>
+
+  <!-- Help Modal -->
+  <div id="helpModal" class="modalBackdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="modalHeader">
+        <div id="helpTitle">도움말</div>
+        <button id="helpClose" class="modalClose">닫기</button>
+      </div>
+      <div class="modalBody">
+        <ul>
+          <li>✅ <b>SRT가 나눈 블록(시간/번호) 그대로 유지</b>하고, 각 블록 한글에 해당하는 DOCX 일본어를 넣습니다.</li>
+          <li>오른쪽 DOCX는 <b>줄 클릭</b>으로 왼쪽 치환칸에 삽입(드래그 안 씀).</li>
+          <li><b>일어–일어 사이 빈 줄 제거</b> + 삽입 시에도 <b>빈 줄 일괄 제거</b></li>
+          <li><b>숫자+문장(예: 43 こうして…)</b>은 오른쪽에서 자동으로 <b>숫자/본문 줄 분리</b></li>
+          <li>“<b>제목(한글)</b>” 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력</li>
+          <li><b>숫자만 블록(1,2,3...)</b>은 <b>[오프닝 멘트] 이전까지만</b> DOCX 원고(1 〜)로 대체</li>
+        </ul>
+      </div>
+    </div>
   </div>
 
   <div class="topbar">
@@ -196,6 +247,10 @@
       <div class="smallNote">
         ※ 다운로드 파일명: <b>[SRT의 8자리날짜]_jp.srt</b> (예: 20260218_jp.srt)
       </div>
+      <div class="smallNote">
+        ※ 표의 일본어 편집칸을 클릭해 둔 뒤, 오른쪽 DOCX에서 <b>일본어 줄 클릭</b>하면 자동 삽입됩니다.
+        (기존 값 있으면 <b>아래줄로 추가</b>) / 삽입·수정하면 자동 OK
+      </div>
     </div>
   </div>
 
@@ -204,16 +259,15 @@
       <div class="panelHeader">
         <div>
           <div class="title">결과(왼쪽)</div>
-          <div class="small">상단: 최종 SRT / 하단: 매칭 상세(일본어 편집 가능, 편집 시 OK로 변경)</div>
+          <div class="small">매칭 상세(일본어 편집 가능, 편집 시 OK로 변경) / 행 클릭 → 오른쪽 DOCX 하이라이트/이동</div>
         </div>
         <div class="small" id="leftStat"></div>
       </div>
 
       <div class="panelBody">
+        <div class="pill">매칭 상세</div>
 
-        <div class="pill" style="margin-top:12px;">매칭 상세 (행 클릭 → 오른쪽 DOCX 하이라이트/이동)</div>
-
-        <div style="max-height: 440px; overflow:auto; border:1px solid #eee; border-radius: 12px; margin-top:8px;">
+        <div style="max-height: 1000px; overflow:auto; border:1px solid #eee; border-radius: 12px; margin-top:8px;">
           <table>
             <thead>
               <tr>
@@ -258,13 +312,13 @@
   let srtText = "";
   let docxTextRaw = "";
 
-  // ✅ 다운로드 파일명 생성용
+  // 다운로드 파일명 베이스 (SRT 파일명에서 8자리 날짜 우선)
   let srtFileNameBase = "output";
 
   let lastBlocks = [];
   let lastReport = [];
 
-  // 제목/본문(본문=성경구절) 추출
+  // 제목/본문(성경구절) 추출
   let docTitleExtract = { title: "", passage: "" };
   // 오프닝 이전 숫자 원고(1 〜) 추출
   let docManuscriptMap = new Map();
@@ -275,7 +329,6 @@
   const statusEl = $("status");
   const runBtn = $("runBtn");
   const dlBtn = $("dlBtn");
-  const outSrt = $("outSrt");
   const detailBody = $("detailBody");
   const leftStat = $("leftStat");
 
@@ -287,6 +340,18 @@
   const recentSrtSel = $("recentSrt");
   const recentDocxSel = $("recentDocx");
   const dropzone = $("dropzone");
+
+  // help modal
+  const helpBtn = $("helpBtn");
+  const helpModal = $("helpModal");
+  const helpClose = $("helpClose");
+
+  function openHelp() { helpModal.style.display = "flex"; helpModal.setAttribute("aria-hidden", "false"); }
+  function closeHelp() { helpModal.style.display = "none"; helpModal.setAttribute("aria-hidden", "true"); }
+  helpBtn.addEventListener("click", openHelp);
+  helpClose.addEventListener("click", closeHelp);
+  helpModal.addEventListener("click", (e) => { if (e.target === helpModal) closeHelp(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHelp(); });
 
   function setStatus(html) { statusEl.innerHTML = html; }
   function canRun() { return srtText.trim().length > 0 && docxTextRaw.trim().length > 0; }
@@ -311,6 +376,7 @@
   function hasHangul(str) { return /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(str); }
   function hasJapanese(str) { return /[\u3040-\u30ff\u4e00-\u9fff]/.test(str); }
 
+  // 한글 키 정규화 (띄어쓰기/줄바꿈/따옴표 제거)
   function normalizeKo(str) {
     return (str || "")
       .replace(/\uFEFF/g, "")
@@ -320,15 +386,16 @@
       .trim();
   }
 
+  // [라벨] : 내용 형태면 내용만
   function cleanKoKey(line) {
-    const m = line.match(/^(.{1,30})\s*:\s*(.+)$/);
+    const m = (line || "").match(/^(.{1,30})\s*:\s*(.+)$/);
     if (m) {
       const left = m[1].trim();
       const right = m[2].trim();
       if (left.startsWith("[") && left.endsWith("]")) return right;
       if (left.length <= 8) return right;
     }
-    return line.trim();
+    return (line || "").trim();
   }
 
   function normalizeTimeLine(t) { return (t || "").trim(); }
@@ -347,7 +414,7 @@
     return s.startsWith("[오프닝 멘트]") || s.startsWith("[오프닝멘트]") || s.startsWith("[오프닝") || s.startsWith("오프닝 멘트");
   }
 
-  // ✅ SRT 파일명에서 8자리 숫자(YYYYMMDD) 우선 추출 -> 출력 파일명 베이스로
+  // SRT 파일명에서 8자리 날짜 우선 추출
   function computeSrtBaseName(filename) {
     const name = (filename || "").replace(/^.*[\\/]/, "");
     const noExt = name.replace(/\.[^.]+$/, "");
@@ -356,7 +423,7 @@
     return noExt || "output";
   }
 
-  // ✅ SRT 파싱: idx/time/body 그대로 유지
+  // SRT 파싱: idx/time/body 그대로 유지
   function parseSrt(text) {
     const blocks = text.replace(/\r/g, "").split(/\n\s*\n/);
     const items = [];
@@ -372,6 +439,54 @@
       items.push({ idx: idx || String(items.length + 1), time, body });
     }
     return items;
+  }
+
+  // ===== fuzzy matching helpers =====
+  function makeBigrams(s) {
+    const x = (s || "").trim();
+    const arr = [];
+    for (let i = 0; i < x.length - 1; i++) arr.push(x.slice(i, i + 2));
+    return arr;
+  }
+  function diceSim(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+
+    const A = makeBigrams(a);
+    const B = makeBigrams(b);
+    if (A.length === 0 || B.length === 0) return 0;
+
+    const map = new Map();
+    for (const g of A) map.set(g, (map.get(g) || 0) + 1);
+
+    let inter = 0;
+    for (const g of B) {
+      const c = map.get(g) || 0;
+      if (c > 0) { inter++; map.set(g, c - 1); }
+    }
+    return (2 * inter) / (A.length + B.length);
+  }
+  function findBestKoKey(normKo, koKeys, threshold = 0.88) {
+    if (!normKo) return { key: "", score: 0 };
+
+    // 부분 포함 우선
+    for (const k of koKeys) {
+      if (!k) continue;
+      if (k.includes(normKo) || normKo.includes(k)) {
+        const score = 0.95;
+        if (score >= threshold) return { key: k, score };
+      }
+    }
+
+    // Dice 최고값
+    let bestK = "";
+    let bestS = 0;
+    for (const k of koKeys) {
+      const s = diceSim(normKo, k);
+      if (s > bestS) { bestS = s; bestK = k; }
+    }
+    if (bestS >= threshold) return { key: bestK, score: bestS };
+    return { key: "", score: bestS };
   }
 
   // ===== DOCX: title/passage extraction (タイトル / 本　　文) =====
@@ -390,7 +505,6 @@
       }
 
       if (!passage) {
-        // "本文:" or "本　　文:" (공백/전각공백 허용)
         let m = s.match(/^本文\s*:\s*(.+)$/);
         if (!m || !m[1]) m = s.match(/^本[\s　]*文\s*:\s*(.+)$/);
         if (m && m[1]) passage = m[1].trim();
@@ -398,7 +512,6 @@
 
       if (title && passage) break;
     }
-
     return { title, passage };
   }
 
@@ -475,7 +588,7 @@
     return map;
   }
 
-  // ===== TEXT CLEAN: remove blank lines =====
+  // remove blank lines (JP)
   function removeBlankLinesAggressive(text) {
     const lines = (text || "").replace(/\r/g, "").split("\n");
     const out = [];
@@ -499,7 +612,6 @@
       const ln = (ln0 || "").trim();
       if (!ln) { step1.push(""); continue; }
 
-      // 숫자+일어 라인 분리
       const m = ln.match(/^(\d{1,3})\s+(.+)$/);
       if (m) {
         const num = m[1];
@@ -520,31 +632,25 @@
       const next = (i + 1 < step1.length) ? (step1[i + 1] ?? "").trim() : "";
 
       if (!cur) {
-        // prev & next가 둘 다 일본어면 빈줄 제거
-        if (prev && next && hasJapanese(prev) && hasJapanese(next)) continue;
-        // 연속 빈줄 제거
-        if (out.length && out[out.length - 1] === "") continue;
+        if (prev && next && hasJapanese(prev) && hasJapanese(next)) continue; // JP-JP 빈줄 제거
+        if (out.length && out[out.length - 1] === "") continue; // 연속 빈줄 제거
         out.push("");
         continue;
       }
 
-      // JP -> KO로 넘어갈 때 KO 앞에 빈줄 1줄 보장
       if (hasHangul(cur) && prev && prev !== "" && hasJapanese(prev)) {
         if (out[out.length - 1] !== "") out.push("");
       }
 
-      // KO -> JP는 빈줄 없이 바로
       out.push(cur);
     }
 
-    // 끝 빈줄 제거
     while (out.length && out[out.length - 1] === "") out.pop();
     return out.map(t => ({ text: t, isBlank: t === "" }));
   }
 
   function renderDocxView(lines) {
     docxViewLines = lines;
-
     docxView.innerHTML = "";
     if (!lines || !lines.length) {
       docxView.textContent = "(DOCX 내용이 없습니다)";
@@ -591,19 +697,16 @@
   function makeDocxAnchorFromKo(koRaw) {
     const raw = (koRaw || "").trim();
     if (!raw) return "";
-
     const lines = raw.split("\n").map(s => s.trim()).filter(Boolean);
     const hangulLines = lines.filter(hasHangul).map(cleanKoKey);
-
     let bestLine = "";
     for (const ln of hangulLines) if (ln.length > bestLine.length) bestLine = ln;
-
     if (bestLine.length > 70) bestLine = bestLine.slice(0, 70);
     bestLine = bestLine.replace(/[“”"]/g, "").trim();
     return bestLine;
   }
 
-  // ===== output rebuild =====
+  // ===== output rebuild (no preview box) =====
   function rebuildOutSrtFromBlocks() {
     const lines = [];
     for (let i = 0; i < lastBlocks.length; i++) {
@@ -613,9 +716,7 @@
       const body = edited ? edited : b.body;
       lines.push(`${b.idx}\n${b.time}\n${body}`);
     }
-    const srtOut = lines.join("\n\n");
-    outSrt.value = srtOut;
-    return srtOut;
+    return lines.join("\n\n");
   }
 
   function refreshOkFailCounts() {
@@ -639,9 +740,10 @@
     const statTd = tr.querySelector("td.colStat");
     if (!statTd) return;
 
+    const sub = r.special ? `<div class="mono" style="font-size:12px;color:#666;">${r.special}</div>` : "";
     statTd.innerHTML = r.ok
-      ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`
-      : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`;
+      ? `<span class="ok">OK</span>${sub}`
+      : `<span class="bad">FAIL</span>${sub}`;
   }
 
   function renderReport(report) {
@@ -658,6 +760,8 @@
       const jpInitial = r.jp || "";
       r.jpEdited = jpInitial;
 
+      const specialSub = r.special ? `<div class="mono" style="font-size:12px;color:#666;">${r.special}</div>` : "";
+
       tr.innerHTML = `
         <td class="mono colIdx">${r.idx}</td>
         <td class="mono colTime">${r.time}</td>
@@ -668,16 +772,12 @@
             placeholder="${r.ok ? "필요하면 일본어를 수정하세요" : "여기에 일본어를 직접 입력(FAIL 해결)"}">${jpInitial}</textarea>
         </td>
         <td class="colStat">
-          ${r.ok
-            ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`
-            : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">${r.special ? r.special : ""}</div>`
-          }
+          ${r.ok ? `<span class="ok">OK</span>${specialSub}` : `<span class="bad">FAIL</span>${specialSub}`}
         </td>
       `;
       detailBody.appendChild(tr);
     }
 
-    rebuildOutSrtFromBlocks();
     refreshOkFailCounts();
   }
 
@@ -688,13 +788,16 @@
     lastFocusedTextarea = ta;
   });
 
-  // ✅ 치환칸 입력 시 OK/FAIL 자동 변경 + 카운트 갱신
+  // 치환칸 입력 시 OK/FAIL 자동 변경 + 카운트 갱신
   detailBody.addEventListener("input", (e) => {
     const ta = e.target.closest("textarea.jpEdit");
     if (!ta) return;
 
     const idx = Number(ta.dataset.jpIndex);
     if (!Number.isFinite(idx) || !lastReport[idx]) return;
+
+    // 빈줄 일괄 제거(원하면 여기서 강제 적용)
+    // ta.value = removeBlankLinesAggressive(ta.value);
 
     lastReport[idx].jpEdited = ta.value;
 
@@ -705,7 +808,6 @@
     else ta.classList.add("fail");
 
     updateRowUIByIndex(idx);
-    rebuildOutSrtFromBlocks();
     refreshOkFailCounts();
   });
 
@@ -727,7 +829,7 @@
     highlightInDocx(anchor);
   });
 
-  // ===== RIGHT CLICK INSERT (doc line click -> textarea append) =====
+  // RIGHT CLICK INSERT: doc line click -> textarea append
   function insertToFocusedTextarea(text) {
     if (!lastFocusedTextarea) {
       setStatus(`<span style="color:#c00;font-weight:900;">주의:</span> 먼저 왼쪽 표에서 일본어 수정칸을 한 번 클릭해 주세요.`);
@@ -744,21 +846,16 @@
     const idx = Number(lastFocusedTextarea.dataset.jpIndex);
     if (Number.isFinite(idx) && lastReport[idx]) {
       lastReport[idx].jpEdited = nextVal;
-
       const hasText = nextVal.trim().length > 0;
       lastReport[idx].ok = hasText;
-
       if (hasText) lastFocusedTextarea.classList.remove("fail");
       else lastFocusedTextarea.classList.add("fail");
-
       updateRowUIByIndex(idx);
       refreshOkFailCounts();
     }
 
     lastFocusedTextarea.focus();
     lastFocusedTextarea.selectionStart = lastFocusedTextarea.selectionEnd = lastFocusedTextarea.value.length;
-
-    rebuildOutSrtFromBlocks();
   }
 
   docxView.addEventListener("click", (e) => {
@@ -769,11 +866,10 @@
     insertToFocusedTextarea(text);
   });
 
-  // ===== ✅ 핵심: SRT 타이밍/블록 그대로, 블록별 문장만 매칭 =====
-  function convertAll_SrtTimingFixed(srtItems, ko2jp) {
+  // 핵심: SRT 타이밍/블록 그대로, 블록별 문장만 매칭 + FUZZY
+  function convertAll_SrtTimingFixed(srtItems, ko2jp, koKeys) {
     const out = [];
     const report = [];
-
     let srtOpeningSeen = false;
 
     for (let i = 0; i < srtItems.length; i++) {
@@ -782,7 +878,7 @@
 
       if (isOpeningMarker(koBodyRaw)) srtOpeningSeen = true;
 
-      // (A) 제목 블록
+      // (A) 제목
       if (isTitleMarker(koBodyRaw)) {
         const title = (docTitleExtract.title || "").trim();
         const passage = (docTitleExtract.passage || "").trim();
@@ -790,51 +886,54 @@
 
         out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
         report.push({
-          idx: item.idx,
-          time: item.time,
-          ko: koBodyRaw,
-          jp: jp || "",
-          ok: !!jp,
+          idx: item.idx, time: item.time, ko: koBodyRaw,
+          jp: jp || "", ok: !!jp,
           special: "TITLE"
         });
         continue;
       }
 
-      // (B) 숫자만 블록: 오프닝 전까지만 원고숫자 대체
+      // (B) 숫자만: 오프닝 전까지만 원고 숫자 대체
       if (!srtOpeningSeen && isNumericOnlyBody(koBodyRaw)) {
         const num = Number(koBodyRaw);
         const jp = docManuscriptMap.get(num) || "";
 
         out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
         report.push({
-          idx: item.idx,
-          time: item.time,
-          ko: koBodyRaw,
-          jp: jp || "",
-          ok: !!jp,
+          idx: item.idx, time: item.time, ko: koBodyRaw,
+          jp: jp || "", ok: !!jp,
           special: "NUM"
         });
         continue;
       }
 
-      // (C) 일반 블록: "이 블록 한글"로만 매칭
+      // (C) 일반: 이 블록 한글로만 매칭
       const normKey1 = normalizeKo(koBodyRaw);
       let jp = normKey1 ? (ko2jp.get(normKey1) || "") : "";
+      let special = "";
 
-      // 라벨형 한글(예: [오프닝 멘트] : ~~~) 보정
+      // 라벨형 보정
+      let normKey2 = "";
       if (!jp) {
-        const normKey2 = normalizeKo(cleanKoKey(koBodyRaw));
+        normKey2 = normalizeKo(cleanKoKey(koBodyRaw));
         if (normKey2) jp = ko2jp.get(normKey2) || "";
+      }
+
+      // FUZZY (정확매칭 실패 시)
+      if (!jp) {
+        const base = normKey2 || normKey1;
+        const best = findBestKoKey(base, koKeys, 0.88); // 더 느슨하게 하려면 0.85
+        if (best.key) {
+          jp = ko2jp.get(best.key) || "";
+          special = `FUZZY ${best.score.toFixed(2)}`;
+        }
       }
 
       out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
       report.push({
-        idx: item.idx,
-        time: item.time,
-        ko: koBodyRaw,
-        jp: jp || "",
-        ok: !!jp,
-        special: jp ? "" : "FAIL"
+        idx: item.idx, time: item.time, ko: koBodyRaw,
+        jp: jp || "", ok: !!jp,
+        special: jp ? (special || "") : "FAIL"
       });
     }
 
@@ -970,11 +1069,11 @@
       const srtItems = parseSrt(srtText);
       const dropOpeningLabel = $("dropOpeningLabel").checked;
       const ko2jp = buildKoToJpMap(docxTextRaw, dropOpeningLabel);
+      const koKeys = Array.from(ko2jp.keys());
 
       setStatus(`처리 중... (SRT <b>${srtItems.length}</b> / KO→JP 사전 <b>${ko2jp.size}</b> / 원고숫자 <b>${docManuscriptMap.size}</b>)`);
 
-      // ✅ SRT 타이밍 고정 변환
-      const { out, report } = convertAll_SrtTimingFixed(srtItems, ko2jp);
+      const { out, report } = convertAll_SrtTimingFixed(srtItems, ko2jp, koKeys);
 
       lastBlocks = out;
       renderReport(report);
