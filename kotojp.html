@@ -545,16 +545,44 @@ function isNumericExpressionBody(body) {
   }
 
   // ===== DOCX: title/passage extraction (タイトル / 本　　文) =====
+  function extractTitleAndPassage(docRaw) {
+    const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim()).filter(Boolean);
+    let title = "";
+    let passage = "";
+
+    for (const ln of lines) {
+      const s = ln.trim();
+      if (!s) continue;
+
+      if (!title) {
+        const m = s.match(/^タイトル\s*:\s*(.+)$/);
+        if (m && m[1]) title = m[1].trim();
+      }
+
+      if (!passage) {
+        let m = s.match(/^本文\s*:\s*(.+)$/);
+        if (!m || !m[1]) m = s.match(/^本[\s　]*文\s*:\s*(.+)$/);
+        if (m && m[1]) passage = m[1].trim();
+      }
+
+      if (title && passage) break;
+    }
+    return { title, passage };
+  }
+
+  // ===== DOCX: extract manuscript numbered JP lines BEFORE opening marker in DOCX =====
   function extractManuscriptNumberedJP(docRaw) {
   const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim());
   const map = new Map();
 
+  // ✅ 10. / 10． / 10) / 10: / 10] / 10 (공백없음) 허용
   const numRe = /^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)$/;
 
   for (let i = 0; i < lines.length; i++) {
     const ln = lines[i];
     if (!ln) continue;
 
+    // DOCX에서 오프닝 멘트 등장하면 그 이전까지만 원고숫자 사용
     if (hasHangul(ln) && isOpeningMarker(ln)) break;
 
     const m = ln.match(numRe);
@@ -563,32 +591,33 @@ function isNumericExpressionBody(body) {
     const num = Number(m[1]);
     const first = (m[2] || "").trim();
 
-   if (!(Number.isFinite(num) && num > 0 && first && hasJapanese(first))) continue;
-
+    // 일본어로 시작하는 숫자 원고만
+    if (!(Number.isFinite(num) && num > 0 && first && hasJapanese(first))) continue;
 
     const buf = [first];
 
+    // ✅ 같은 번호 문단 이어붙이기: "빈 줄"은 끊지 않고 스킵
     for (let j = i + 1; j < lines.length; j++) {
-      const nx = lines[j];
-      if (!nx) continue; // ✅ 빈줄은 끊지 않고 스킵
+      const nxRaw = lines[j]; // 이미 trim됨
+      if (!nxRaw) continue;   // ✅ 빈 줄은 건너뛰고 계속
 
-      if (hasHangul(nx) && isOpeningMarker(nx)) break;
+      if (hasHangul(nxRaw) && isOpeningMarker(nxRaw)) break;
 
-      const nxNum = nx.match(numRe);
+      const nxNum = nxRaw.match(numRe);
       if (nxNum) {
         const nextNum = Number(nxNum[1]);
-        if (Number.isFinite(nextNum) && nextNum !== num) break;
-
+        if (Number.isFinite(nextNum) && nextNum !== num) break; // 다음 번호 시작
+        // 같은 번호가 반복되는 이상 케이스면 본문만 추가
         const nxRest = (nxNum[2] || "").trim();
         if (nxRest) buf.push(nxRest);
         continue;
       }
 
-      buf.push(nx);
+      // 번호 시작이 아니면 같은 항목 본문으로 이어붙임
+      buf.push(nxRaw);
     }
 
-    const body = buf.join("\n").trim();
-    map.set(num, `${num} ${body}`.trim()); // ✅ 번호 포함해서 저장
+    map.set(num, buf.join("\n").trim());
   }
 
   return map;
