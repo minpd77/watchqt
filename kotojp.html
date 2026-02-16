@@ -9,9 +9,7 @@
     :root { --gap: 14px; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
     h2 { margin: 0 0 8px; display:flex; align-items:center; gap:10px; }
-    .hint { color:#666; font-size: 13px; line-height:1.45; }
 
-    /* help icon */
     .helpBtn{
       width:28px; height:28px; border-radius:999px;
       border:1px solid #333; background:#fff; color:#111;
@@ -20,7 +18,6 @@
     }
     .helpBtn:hover{ background:#f2f2f2; }
 
-    /* modal */
     .modalBackdrop{
       position:fixed; inset:0;
       background: rgba(0,0,0,.45);
@@ -119,9 +116,7 @@
     th, td{ border:1px solid #eee; padding:8px; vertical-align:top; font-size:13px; }
     th{ background:#fafafa; position:sticky; top:0; z-index:2; }
     tr.unmatched{ background:#ffe5e5; }
-
-    /* ✅ 병합(현재+다음) 자동매칭 재검토용(연노랑) */
-    tr.mergeWarn { background: #fff8cc; }
+    tr.mergeWarn { background: #fff8cc; } /* 연노랑 */
 
     tr.clickable{ cursor:pointer; }
     tr.clickable:hover{ outline:2px solid #111; outline-offset:-2px; }
@@ -131,14 +126,14 @@
     .ok{ color:#0a7; font-weight:900; }
     .bad{ color:#c00; font-weight:900; }
 
-    /* table width tuning (요청 반영) */
+    /* table width tuning */
     th.colIdx, td.colIdx { width: 15px; }
     th.colTime, td.colTime { width: 60px; }
     td.colTime { font-size: 8px; }
 
     th.colKo, td.colKo { width: 300px; }
     th.colJp, td.colJp { width: 360px; }
-    th.colStat, td.colStat { width: 100px; }
+    th.colStat, td.colStat { width: 120px; }
 
     .jpEdit{
       width:100%;
@@ -191,7 +186,6 @@
     <span id="helpBtn" class="helpBtn" title="도움말">?</span>
   </h2>
 
-  <!-- Help Modal -->
   <div id="helpModal" class="modalBackdrop" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
       <div class="modalHeader">
@@ -200,13 +194,13 @@
       </div>
       <div class="modalBody">
         <ul>
-          <li>✅ <b>SRT가 나눈 블록(시간/번호) 그대로 유지</b>하고, 각 블록 한글에 해당하는 DOCX 일본어를 넣습니다.</li>
+          <li>✅ <b>SRT 블록(번호/시간) 그대로 유지</b>하고, 각 블록 한글에 해당하는 DOCX 일본어를 넣습니다.</li>
           <li>오른쪽 DOCX는 <b>줄 클릭</b>으로 왼쪽 치환칸에 삽입(드래그 안 씀).</li>
           <li><b>일어–일어 사이 빈 줄 제거</b> + 삽입 시에도 <b>빈 줄 일괄 제거</b></li>
-          <li><b>숫자+문장(예: 43 こうして…)</b>은 오른쪽에서 자동으로 <b>숫자/본문 줄 분리</b></li>
-          <li>“<b>제목(한글)</b>” 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력</li>
+          <li><b>제목(한글)</b> 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력</li>
           <li><b>숫자만 블록(1,2,3...)</b>은 <b>[오프닝 멘트] 이전까지만</b> DOCX 원고(1 〜)로 대체</li>
-          <li><b>병합 매칭</b>: 현재 행 FAIL인데, DOCX가 (현재+다음)으로 95%급 매칭되면 현재 행에 일본어 2개를 넣고 <b>연노랑 표시</b>합니다.</li>
+          <li><b>“10절 …”</b> 같이 시작하면 verse=10으로 보고 <b>DOCX 원고 10…</b>을 우선 삽입</li>
+          <li><b>병합 매칭</b>: 현재 FAIL인데, (현재+다음)으로 0.95급 매칭되면 현재 행에 일본어를 넣고 <b>연노랑 표시</b>합니다. (단, 다음 문장 키와 같은 키면 병합 금지)</li>
         </ul>
       </div>
     </div>
@@ -263,7 +257,7 @@
       <div class="panelHeader">
         <div>
           <div class="title">결과(왼쪽)</div>
-          <div class="small">매칭 상세(일본어 편집 가능, 편집 시 OK로 변경) / 행 클릭 → 오른쪽 DOCX 하이라이트/이동</div>
+          <div class="small">매칭 상세(일본어 편집 가능) / 행 클릭 → 오른쪽 DOCX 하이라이트/이동</div>
         </div>
         <div class="small" id="leftStat"></div>
       </div>
@@ -316,15 +310,12 @@
   let srtText = "";
   let docxTextRaw = "";
 
-  // 다운로드 파일명 베이스 (SRT 파일명에서 8자리 날짜 우선)
   let srtFileNameBase = "output";
 
   let lastBlocks = [];
   let lastReport = [];
 
-  // 제목/본문(성경구절) 추출
   let docTitleExtract = { title: "", passage: "" };
-  // 오프닝 이전 숫자 원고(1 〜) 추출
   let docManuscriptMap = new Map();
 
   let docxViewLines = [];
@@ -345,7 +336,6 @@
   const recentDocxSel = $("recentDocx");
   const dropzone = $("dropzone");
 
-  // help modal
   const helpBtn = $("helpBtn");
   const helpModal = $("helpModal");
   const helpClose = $("helpClose");
@@ -380,34 +370,17 @@
   function hasHangul(str) { return /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(str); }
   function hasJapanese(str) { return /[\u3040-\u30ff\u4e00-\u9fff]/.test(str); }
 
-  // ✅ 한글 키 정규화 (띄어쓰기/줄바꿈/따옴표/기호 제거 강화)
-// - "10 = 10 = 10." / "10=10=10" / "10 =10= 10" => 동일하게 매칭되도록 처리
-function normalizeKo(str) {
-  return (str || "")
-    .replace(/\uFEFF/g, "")
-    .replace(/[“”"]/g, "")
-    .replace(/\s+/g, "")
-    .replace(/[·…]/g, "")
-    // ✅ 숫자/구절/표현에서 흔한 기호 제거(매칭 안정화)
-    .replace(/[=.,:;!?()]/g, "")
-    .trim();
-}
+  // 한글 키 정규화 (매칭 안정화: 공백/기호 제거)
+  function normalizeKo(str) {
+    return (str || "")
+      .replace(/\uFEFF/g, "")
+      .replace(/[“”"]/g, "")
+      .replace(/\s+/g, "")
+      .replace(/[·…]/g, "")
+      .replace(/[=.,:;!?()]/g, "")
+      .trim();
+  }
 
-// ✅ "숫자만" 블록 판단 (기존 규칙 유지: 1,2,3... 같은 순번용)
-function isNumericOnlyBody(body) {
-  const s = (body || "").trim();
-  return /^\d+$/.test(s);
-}
-
-// ✅ "숫자+기호" 표현 판단 (예: "10 = 10 = 10.", "21:1-12", "3.14", "1+1")
-// 필요할 때만 사용(숫자만 블록 규칙을 망치지 않으려면, 기존 NUM 로직엔 넣지 않는 걸 권장)
-function isNumericExpressionBody(body) {
-  const s = (body || "").trim();
-  if (!s) return false;
-  return /^[0-9\s=+\-*/().,:;]+$/.test(s);
-}
-
-  // [라벨] : 내용 형태면 내용만
   function cleanKoKey(line) {
     const m = (line || "").match(/^(.{1,30})\s*:\s*(.+)$/);
     if (m) {
@@ -426,6 +399,14 @@ function isNumericExpressionBody(body) {
     return /^\d+$/.test(s);
   }
 
+  // 숫자표현 전체(=만으로 이루어진 식) 판별: NUM 로직에는 쓰지 않는게 안전했지만,
+  // 사용자가 원하면 here 확장 가능. (현재는 merge/일반 처리로 둠)
+  function isNumericExpressionBody(body) {
+    const s = (body || "").trim();
+    if (!s) return false;
+    return /^[0-9\s=+\-*/().,:;]+$/.test(s);
+  }
+
   function isTitleMarker(body) {
     return (body || "").replace(/\s+/g, "").trim() === "제목";
   }
@@ -435,7 +416,6 @@ function isNumericExpressionBody(body) {
     return s.startsWith("[오프닝 멘트]") || s.startsWith("[오프닝멘트]") || s.startsWith("[오프닝") || s.startsWith("오프닝 멘트");
   }
 
-  // 병합 대상으로 삼을 수 있는 SRT 바디인지
   function isMergeCandidateBody(body) {
     const s = (body || "").trim();
     if (!s) return false;
@@ -445,7 +425,47 @@ function isNumericExpressionBody(body) {
     return true;
   }
 
-  // SRT 파일명에서 8자리 날짜 우선 추출
+  // ✅ "10절" 번호 추출 강화 버전
+// - 앞뒤에 따옴표/괄호/대괄호/전각 괄호/특수기호가 있어도 잡음
+// - "(10절)", "【10절】", "「10절」", "『10절』", "〈10절〉", "《10절》" 등 지원
+// - 문자열 어딘가에 (10절) 표시가 있어도 잡음(첫 번째 매치 우선)
+function extractVerseNumberFromKo(body) {
+  const s0 = (body || "").trim();
+  if (!s0) return null;
+
+  // 1) 흔한 전각/특수 따옴표/괄호를 반각으로 정규화 + 잡기 쉬운 형태로 치환
+  const s = s0
+    .replace(/\uFEFF/g, "")
+    // 전각 괄호/따옴표류 → 일반 문자로
+    .replace(/[（]/g, "(").replace(/[）]/g, ")")
+    .replace(/[［]/g, "[").replace(/[］]/g, "]")
+    .replace(/[｛]/g, "{").replace(/[｝]/g, "}")
+    .replace(/[〈]/g, "<").replace(/[〉]/g, ">")
+    .replace(/[《]/g, "<").replace(/[》]/g, ">")
+    .replace(/[「]/g, "\"").replace(/[」]/g, "\"")
+    .replace(/[『]/g, "\"").replace(/[』]/g, "\"")
+    .replace(/[“”]/g, "\"")
+    // 괄호/따옴표 앞뒤에 생기는 불필요 공백 정리
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // 2) 우선순위: 맨 앞에서 시작하는 "10절" 형태 (부호가 앞에 있어도 허용)
+  // 예) "10절", "(10절)", "【10절】", "\"10절\"" 등
+  // 시작부에 여러 부호가 있을 수 있어서 [\(\[\{<"']* 허용
+  let m = s.match(/^[\s\(\[\{<"']*(\d{1,3})\s*절\b/);
+  if (m) return Number(m[1]);
+
+  // 3) 본문 중간에 "(10절)" 같은 표기가 있는 경우 (첫 번째 것)
+  m = s.match(/[\(\[\{<"']\s*(\d{1,3})\s*절\s*[\)\]\}>\"']/);
+  if (m) return Number(m[1]);
+
+  // 4) 부호 없이도 중간에 "10절"이라고 쓰는 경우 (첫 번째 것)
+  m = s.match(/\b(\d{1,3})\s*절\b/);
+  if (m) return Number(m[1]);
+
+  return null;
+}
+
   function computeSrtBaseName(filename) {
     const name = (filename || "").replace(/^.*[\\/]/, "");
     const noExt = name.replace(/\.[^.]+$/, "");
@@ -454,7 +474,6 @@ function isNumericExpressionBody(body) {
     return noExt || "output";
   }
 
-  // SRT 파싱: idx/time/body 그대로 유지
   function parseSrt(text) {
     const blocks = text.replace(/\r/g, "").split(/\n\s*\n/);
     const items = [];
@@ -472,13 +491,14 @@ function isNumericExpressionBody(body) {
     return items;
   }
 
-  // ===== fuzzy matching helpers =====
+  // ===== fuzzy helpers =====
   function makeBigrams(s) {
     const x = (s || "").trim();
     const arr = [];
     for (let i = 0; i < x.length - 1; i++) arr.push(x.slice(i, i + 2));
     return arr;
   }
+
   function diceSim(a, b) {
     if (!a || !b) return 0;
     if (a === b) return 1;
@@ -497,10 +517,10 @@ function isNumericExpressionBody(body) {
     }
     return (2 * inter) / (A.length + B.length);
   }
+
   function findBestKoKey(normKo, koKeys, threshold = 0.88) {
     if (!normKo) return { key: "", score: 0 };
 
-    // 부분 포함 우선
     for (const k of koKeys) {
       if (!k) continue;
       if (k.includes(normKo) || normKo.includes(k)) {
@@ -509,7 +529,6 @@ function isNumericExpressionBody(body) {
       }
     }
 
-    // Dice 최고값
     let bestK = "";
     let bestS = 0;
     for (const k of koKeys) {
@@ -520,31 +539,53 @@ function isNumericExpressionBody(body) {
     return { key: "", score: bestS };
   }
 
-  // 한글→일본어 매칭(정확/라벨/퍼지) 공통 함수
+  // ✅ match 결과에 score/kind 포함 (MERGE+NEXT 오동작 방지용)
   function matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, threshold) {
     const n1 = normalizeKo(koBodyRaw);
     let jp = n1 ? (ko2jp.get(n1) || "") : "";
     let special = "";
     let usedKey = "";
+    let score = 0;
+    let kind = "";
 
     let n2 = "";
-    if (!jp) {
-      n2 = normalizeKo(cleanKoKey(koBodyRaw));
-      if (n2) jp = ko2jp.get(n2) || "";
+
+    // EXACT
+    if (jp) {
+      usedKey = n1;
+      score = 1;
+      kind = "EXACT";
+      return { jp, special: "EXACT", usedKey, score, kind };
     }
-    if (!jp) {
-      const base = n2 || n1;
-      const best = findBestKoKey(base, koKeys, threshold);
-      if (best.key) {
-        jp = ko2jp.get(best.key) || "";
-        special = `FUZZY ${best.score.toFixed(2)}`;
-        usedKey = best.key;
+
+    // LABEL-LIKE
+    n2 = normalizeKo(cleanKoKey(koBodyRaw));
+    if (n2) {
+      jp = ko2jp.get(n2) || "";
+      if (jp) {
+        usedKey = n2;
+        score = 1;
+        kind = "EXACT";
+        return { jp, special: "EXACT", usedKey, score, kind };
       }
     }
-    return { jp, special, usedKey };
+
+    // FUZZY
+    const base = n2 || n1;
+    const best = findBestKoKey(base, koKeys, threshold);
+    if (best.key) {
+      jp = ko2jp.get(best.key) || "";
+      usedKey = best.key;
+      score = best.score;
+      kind = "FUZZY";
+      special = `FUZZY ${best.score.toFixed(2)}`;
+      return { jp, special, usedKey, score, kind };
+    }
+
+    return { jp: "", special: "", usedKey: "", score: 0, kind: "" };
   }
 
-  // ===== DOCX: title/passage extraction (タイトル / 本　　文) =====
+  // ===== DOCX title/passage =====
   function extractTitleAndPassage(docRaw) {
     const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim()).filter(Boolean);
     let title = "";
@@ -570,60 +611,93 @@ function isNumericExpressionBody(body) {
     return { title, passage };
   }
 
-  // ===== DOCX: extract manuscript numbered JP lines BEFORE opening marker in DOCX =====
+  // =========================================================
+  // ✅ 요청대로 "extractManuscriptNumberedJP()" 통째로 (수정완료)
+  // - DOCX에서 "10 ルベン族..." / "10.ルベン族..." / "10．..." 모두 인식
+  // - "10절 말씀입니다." 같은 한글 포함 라인은 절대 원고로 취급하지 않음
+  // - 위에서부터 스캔, 같은 번호는 첫 번째만 채택(덮어쓰기 금지)
+  // - 내용은 반드시 "10 ..." (번호 포함)으로 저장
+  // - 빈 줄은 이어붙이되, 다음 번호가 시작되면 종료
+  // - [오프닝 멘트] (한글) 나오면 그 이전까지만 원고로 사용
+  // =========================================================
   function extractManuscriptNumberedJP(docRaw) {
-  const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim());
-  const map = new Map();
+    const lines = docRaw.replace(/\r/g, "").split("\n");
+    const map = new Map();
 
-  // ✅ 10. / 10． / 10) / 10: / 10] / 10 (공백없음) 허용
-  const numRe = /^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)$/;
+    // 10 / 10. / 10． / 10) / 10: / 10] / 10　(공백없음) 지원
+    const numRe = /^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)?$/;
 
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i];
-    if (!ln) continue;
+    for (let i = 0; i < lines.length; i++) {
+      const raw = (lines[i] ?? "");
+      const ln = raw.trim();
+      if (!ln) continue;
 
-    // DOCX에서 오프닝 멘트 등장하면 그 이전까지만 원고숫자 사용
-    if (hasHangul(ln) && isOpeningMarker(ln)) break;
+      // 오프닝 멘트(한글) 나오면 종료
+      if (hasHangul(ln) && isOpeningMarker(ln)) break;
 
-    const m = ln.match(numRe);
-    if (!m) continue;
+      // 한글이 포함된 "10절 ..." 같은 라인은 원고 취급 금지
+      if (hasHangul(ln)) continue;
 
-    const num = Number(m[1]);
-    const first = (m[2] || "").trim();
+      const m = ln.match(numRe);
+      if (!m) continue;
 
-    // 일본어로 시작하는 숫자 원고만
-    if (!(Number.isFinite(num) && num > 0 && first && hasJapanese(first))) continue;
+      const num = Number(m[1]);
+      if (!(Number.isFinite(num) && num > 0)) continue;
 
-    const buf = [first];
+      // 이미 위에서 같은 번호를 잡았으면(가장 위 우선) 스킵
+      if (map.has(num)) continue;
 
-    // ✅ 같은 번호 문단 이어붙이기: "빈 줄"은 끊지 않고 스킵
-    for (let j = i + 1; j < lines.length; j++) {
-      const nxRaw = lines[j]; // 이미 trim됨
-      if (!nxRaw) continue;   // ✅ 빈 줄은 건너뛰고 계속
+      const rest0 = (m[2] || "").trim();
 
-      if (hasHangul(nxRaw) && isOpeningMarker(nxRaw)) break;
-
-      const nxNum = nxRaw.match(numRe);
-      if (nxNum) {
-        const nextNum = Number(nxNum[1]);
-        if (Number.isFinite(nextNum) && nextNum !== num) break; // 다음 번호 시작
-        // 같은 번호가 반복되는 이상 케이스면 본문만 추가
-        const nxRest = (nxNum[2] || "").trim();
-        if (nxRest) buf.push(nxRest);
-        continue;
+      // "10" 단독 줄은 다음 줄에서 일본어 시작을 기다림
+      let buf = [];
+      if (rest0) {
+        // 일본어가 없으면(예: 영어/기호) 원고로 취급하지 않음
+        if (!hasJapanese(rest0)) continue;
+        buf.push(rest0);
       }
 
-      // 번호 시작이 아니면 같은 항목 본문으로 이어붙임
-      buf.push(nxRaw);
+      // 다음 줄들 이어붙이기
+      for (let j = i + 1; j < lines.length; j++) {
+        const nx = (lines[j] ?? "").trim();
+
+        if (!nx) continue; // 빈 줄은 무시하고 계속
+
+        // 오프닝 멘트(한글) 나오면 종료
+        if (hasHangul(nx) && isOpeningMarker(nx)) break;
+
+        // 다음 번호 시작이면 종료
+        if (!hasHangul(nx)) {
+          const nm = nx.match(numRe);
+          if (nm) {
+            const nextNum = Number(nm[1]);
+            if (Number.isFinite(nextNum) && nextNum !== num) break;
+            // 같은 번호가 반복되면 그 rest를 이어붙임
+            const r2 = (nm[2] || "").trim();
+            if (r2 && hasJapanese(r2)) buf.push(r2);
+            continue;
+          }
+        }
+
+        // 한글 라인이 끼면 원고 본문 종료 (원고는 "숫자+일어"만)
+        if (hasHangul(nx)) break;
+
+        // 일본어가 포함된 줄만 추가 (원고 조건 유지)
+        if (hasJapanese(nx)) buf.push(nx);
+      }
+
+      // buf가 비었으면(=10 단독인데 뒤에 일본어가 없었음) 무시
+      if (!buf.length) continue;
+
+      // ✅ 번호 포함해서 저장
+      const combined = `${num} ${buf.join("\n").trim()}`.trim();
+      map.set(num, combined);
     }
 
-    map.set(num, buf.join("\n").trim());
+    return map;
   }
 
-  return map;
-}
-
-  // ===== KO->JP dict build =====
+  // ===== KO->JP dict =====
   function stripJpLabels(jpLines, dropOpeningLabel) {
     const out = [];
     for (let ln of jpLines) {
@@ -662,61 +736,49 @@ function isNumericExpressionBody(body) {
     return map;
   }
 
-  // remove blank lines (JP)
   function removeBlankLinesAggressive(text) {
     const lines = (text || "").replace(/\r/g, "").split("\n");
     const out = [];
     for (const ln of lines) {
       const t = ln.trim();
       if (!t) continue;
-      out.push(ln.trim());
+      out.push(t);
     }
     return out.join("\n").trim();
   }
 
-  // ===== DOCX VIEW PREPROCESS =====
-  // 1) "43 こうして..." -> "43" + "こうして..." 분리
-  // 2) 일어-일어 사이 빈줄 제거
-  // 3) 한글로 넘어가기 직전엔 빈줄 1줄(구분)
+  // ===== DOCX VIEW (원고 그대로 유지) =====
+  // ✅ 여기서 더 이상 "10 …"을 "10"과 "본문"으로 쪼개지 않음
+  // ✅ 다만 "일어-일어 사이 빈 줄"은 제거 (보기/복사 편의)
   function buildDocxViewLines(docRaw) {
     const rawLines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trimEnd());
-    const step1 = [];
-
-    for (const ln0 of rawLines) {
-      const ln = (ln0 || "").trim();
-      if (!ln) { step1.push(""); continue; }
-
-      const m = ln.match(/^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)$/);
-      if (m) {
-        const num = m[1];
-        const rest = (m[2] || "").trim();
-        if (rest && hasJapanese(rest)) {
-          step1.push(num);
-          step1.push(rest);
-          continue;
-        }
-      }
-      step1.push(ln);
-    }
-
     const out = [];
-    for (let i = 0; i < step1.length; i++) {
-      const cur = (step1[i] ?? "").trim();
-      const prev = (out.length ? out[out.length - 1] : "");
-      const next = (i + 1 < step1.length) ? (step1[i + 1] ?? "").trim() : "";
 
-      if (!cur) {
-        if (prev && next && hasJapanese(prev) && hasJapanese(next)) continue; // JP-JP 빈줄 제거
-        if (out.length && out[out.length - 1] === "") continue; // 연속 빈줄 제거
+    for (let i = 0; i < rawLines.length; i++) {
+      const cur = (rawLines[i] ?? "").trimEnd();
+      const trimmed = cur.trim();
+
+      if (!trimmed) {
+        const prev = (out.length ? out[out.length - 1] : "");
+        const next = (i + 1 < rawLines.length) ? (rawLines[i + 1] ?? "").trim() : "";
+
+        // JP-JP 빈줄 제거
+        if (prev && next && hasJapanese(prev) && hasJapanese(next)) continue;
+
+        // 연속 빈줄 제거
+        if (out.length && out[out.length - 1] === "") continue;
+
         out.push("");
         continue;
       }
 
-      if (hasHangul(cur) && prev && prev !== "" && hasJapanese(prev)) {
+      // 한글 시작 전, 직전이 일본어면 구분용 빈줄 1줄
+      const prev = (out.length ? out[out.length - 1] : "");
+      if (hasHangul(trimmed) && prev && prev !== "" && hasJapanese(prev)) {
         if (out[out.length - 1] !== "") out.push("");
       }
 
-      out.push(cur);
+      out.push(trimmed);
     }
 
     while (out.length && out[out.length - 1] === "") out.pop();
@@ -780,7 +842,6 @@ function isNumericExpressionBody(body) {
     return bestLine;
   }
 
-  // ===== output rebuild (no preview box) =====
   function rebuildOutSrtFromBlocks() {
     const lines = [];
     for (let i = 0; i < lastBlocks.length; i++) {
@@ -859,14 +920,12 @@ function isNumericExpressionBody(body) {
     refreshOkFailCounts();
   }
 
-  // textarea focus tracking
   detailBody.addEventListener("focusin", (e) => {
     const ta = e.target.closest("textarea.jpEdit");
     if (!ta) return;
     lastFocusedTextarea = ta;
   });
 
-  // 치환칸 입력 시 OK/FAIL 자동 변경 + 카운트 갱신
   detailBody.addEventListener("input", (e) => {
     const ta = e.target.closest("textarea.jpEdit");
     if (!ta) return;
@@ -886,7 +945,6 @@ function isNumericExpressionBody(body) {
     refreshOkFailCounts();
   });
 
-  // row click -> docx highlight
   detailBody.addEventListener("click", (e) => {
     const tr = e.target.closest("tr");
     if (!tr) return;
@@ -904,7 +962,6 @@ function isNumericExpressionBody(body) {
     highlightInDocx(anchor);
   });
 
-  // RIGHT CLICK INSERT: doc line click -> textarea append
   function insertToFocusedTextarea(text) {
     if (!lastFocusedTextarea) {
       setStatus(`<span style="color:#c00;font-weight:900;">주의:</span> 먼저 왼쪽 표에서 일본어 수정칸을 한 번 클릭해 주세요.`);
@@ -941,7 +998,14 @@ function isNumericExpressionBody(body) {
     insertToFocusedTextarea(text);
   });
 
-  // 핵심: SRT 타이밍/블록 그대로, 블록별 문장만 매칭 + FUZZY + (현재+다음 병합 0.95)
+  // =========================
+  // ✅ 핵심 변환 로직
+  // - verse(10절) 우선
+  // - 제목 처리
+  // - 숫자만 블록 처리(오프닝 전)
+  // - 일반 매칭(정확/퍼지)
+  // - MERGE+NEXT는 "현재 FAIL + 합쳐진키가 다음키와 다를 때 + 0.95"에서만
+  // =========================
   function convertAll_SrtTimingFixed(srtItems, ko2jp, koKeys) {
     const out = [];
     const report = [];
@@ -952,6 +1016,20 @@ function isNumericExpressionBody(body) {
       const koBodyRaw = (item.body || "").trim();
 
       if (isOpeningMarker(koBodyRaw)) srtOpeningSeen = true;
+
+      // (0) verse 우선 (예: "10절 ...")
+      const verse = extractVerseNumberFromKo(koBodyRaw);
+      if (verse != null && docManuscriptMap.has(verse)) {
+        const jp = docManuscriptMap.get(verse) || "";
+        out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
+        report.push({
+          idx: item.idx, time: item.time, ko: koBodyRaw,
+          jp: jp || "", ok: !!jp,
+          mergeWarn: false,
+          special: jp ? `VERSE ${verse}` : "FAIL"
+        });
+        continue;
+      }
 
       // (A) 제목
       if (isTitleMarker(koBodyRaw)) {
@@ -970,7 +1048,7 @@ function isNumericExpressionBody(body) {
       }
 
       // (B) 숫자만: 오프닝 전까지만 원고 숫자 대체
-      if (!srtOpeningSeen && (isNumericOnlyBody(koBodyRaw) || isNumericExpressionBody(koBodyRaw))) {
+      if (!srtOpeningSeen && isNumericOnlyBody(koBodyRaw)) {
         const num = Number(koBodyRaw);
         const jp = docManuscriptMap.get(num) || "";
 
@@ -984,20 +1062,19 @@ function isNumericExpressionBody(body) {
         continue;
       }
 
-      // (C) 일반: SRT 블록 기준, docx 한글 길이가 달라서 다음 문장과 합치면 매칭되는 케이스 지원
+      // (C) 일반 매칭
       let jp = "";
       let special = "";
       let mergeWarn = false;
 
-      // 1) 기본 매칭(기존과 동일) - threshold 0.88
-      {
-        const m = matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, 0.88);
-        jp = m.jp || "";
-        special = m.jp ? (m.special || "") : "";
-      }
+      const mCur = matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, 0.88);
+      jp = mCur.jp || "";
+      if (jp) special = mCur.special || "OK";
 
-      // 2) ✅ 병합 매칭: 현재가 FAIL이고, (현재+다음)으로 0.95급 매칭되면
-      //    -> 현재 행에 (현재+다음) 일본어를 넣고, 연노랑 표시
+      // (D) MERGE+NEXT (오동작 방지 조건 강화)
+      // - 현재가 FAIL일 때만
+      // - 다음 문장이 존재하고 merge 후보일 때
+      // - (현재+다음) 강매칭(0.95) AND 그 키가 "다음 문장 단독 키"와 다를 때만
       if (!jp && (i + 1) < srtItems.length) {
         const nextItem = srtItems[i + 1];
         const nextKo = (nextItem.body || "").trim();
@@ -1009,17 +1086,25 @@ function isNumericExpressionBody(body) {
           if (mCombined.jp) {
             const mNextStrong = matchKoToJpWithFuzzy(nextKo, ko2jp, koKeys, 0.95);
 
-            const jpParts = [];
-            jpParts.push(mCombined.jp);
+            // ✅ 핵심: 합쳐진키가 다음키와 같으면 "다음문장꺼 끌어오는 오동작"이므로 병합 금지
+            const nextKey = mNextStrong.usedKey || "";
+            const combinedKey = mCombined.usedKey || "";
 
-            // 다음이 강매칭되면 추가로 붙임(중복 방지)
-            if (mNextStrong.jp && mNextStrong.jp !== mCombined.jp) {
-              jpParts.push(mNextStrong.jp);
+            if (combinedKey && nextKey && combinedKey === nextKey) {
+              // 병합하지 않음 (그냥 FAIL 유지)
+            } else {
+              const jpParts = [];
+              jpParts.push(mCombined.jp);
+
+              // 다음이 강매칭이면 보조로 붙임(중복 제거)
+              if (mNextStrong.jp && mNextStrong.jp !== mCombined.jp) {
+                jpParts.push(mNextStrong.jp);
+              }
+
+              jp = removeBlankLinesAggressive(jpParts.join("\n"));
+              mergeWarn = true;
+              special = `MERGE+NEXT ${mCombined.special || "OK"}`;
             }
-
-            jp = removeBlankLinesAggressive(jpParts.join("\n"));
-            mergeWarn = true;
-            special = `MERGE+NEXT ${mCombined.special || "OK"}`;
           }
         }
       }
@@ -1040,8 +1125,11 @@ function isNumericExpressionBody(body) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
@@ -1060,12 +1148,16 @@ function isNumericExpressionBody(body) {
   async function loadDocxFromFile(file) {
     const arrBuf = await file.arrayBuffer();
     const result = await mammoth.extractRawText({ arrayBuffer: arrBuf });
+
+    // ✅ DOCX는 그대로 (가공 최소)
     docxTextRaw = (result.value || "").trim();
 
     upsertRecent(recent.docx, { name: file.name, text: docxTextRaw });
     refreshRecentSelects();
 
     docTitleExtract = extractTitleAndPassage(docxTextRaw);
+
+    // ✅ 원고 숫자 추출: 위에서부터, 첫 등장만
     docManuscriptMap = extractManuscriptNumberedJP(docxTextRaw);
 
     const lines = buildDocxViewLines(docxTextRaw);
@@ -1173,8 +1265,8 @@ function isNumericExpressionBody(body) {
 
       lastBlocks = out;
       renderReport(report);
-      dlBtn.disabled = false;
 
+      dlBtn.disabled = false;
     } catch (err) {
       console.error(err);
       setStatus(`<span style="color:#c00;font-weight:900;">오류:</span> ${(err?.message || String(err))}`);
