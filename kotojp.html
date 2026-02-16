@@ -380,15 +380,32 @@
   function hasHangul(str) { return /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(str); }
   function hasJapanese(str) { return /[\u3040-\u30ff\u4e00-\u9fff]/.test(str); }
 
-  // 한글 키 정규화 (띄어쓰기/줄바꿈/따옴표 제거)
-  function normalizeKo(str) {
-    return (str || "")
-      .replace(/\uFEFF/g, "")
-      .replace(/[“”"]/g, "")
-      .replace(/\s+/g, "")
-      .replace(/[·…]/g, "")
-      .trim();
-  }
+  // ✅ 한글 키 정규화 (띄어쓰기/줄바꿈/따옴표/기호 제거 강화)
+// - "10 = 10 = 10." / "10=10=10" / "10 =10= 10" => 동일하게 매칭되도록 처리
+function normalizeKo(str) {
+  return (str || "")
+    .replace(/\uFEFF/g, "")
+    .replace(/[“”"]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[·…]/g, "")
+    // ✅ 숫자/구절/표현에서 흔한 기호 제거(매칭 안정화)
+    .replace(/[=.,:;!?()]/g, "")
+    .trim();
+}
+
+// ✅ "숫자만" 블록 판단 (기존 규칙 유지: 1,2,3... 같은 순번용)
+function isNumericOnlyBody(body) {
+  const s = (body || "").trim();
+  return /^\d+$/.test(s);
+}
+
+// ✅ "숫자+기호" 표현 판단 (예: "10 = 10 = 10.", "21:1-12", "3.14", "1+1")
+// 필요할 때만 사용(숫자만 블록 규칙을 망치지 않으려면, 기존 NUM 로직엔 넣지 않는 걸 권장)
+function isNumericExpressionBody(body) {
+  const s = (body || "").trim();
+  if (!s) return false;
+  return /^[0-9\s=+\-*/().,:;]+$/.test(s);
+}
 
   // [라벨] : 내용 형태면 내용만
   function cleanKoKey(line) {
@@ -934,7 +951,7 @@
       }
 
       // (B) 숫자만: 오프닝 전까지만 원고 숫자 대체
-      if (!srtOpeningSeen && isNumericOnlyBody(koBodyRaw)) {
+      if (!srtOpeningSeen && (isNumericOnlyBody(koBodyRaw) || isNumericExpressionBody(koBodyRaw))) {
         const num = Number(koBodyRaw);
         const jp = docManuscriptMap.get(num) || "";
 
