@@ -119,6 +119,10 @@
     th, td{ border:1px solid #eee; padding:8px; vertical-align:top; font-size:13px; }
     th{ background:#fafafa; position:sticky; top:0; z-index:2; }
     tr.unmatched{ background:#ffe5e5; }
+
+    /* ✅ 병합(현재+다음) 자동매칭 재검토용(연노랑) */
+    tr.mergeWarn { background: #fff8cc; }
+
     tr.clickable{ cursor:pointer; }
     tr.clickable:hover{ outline:2px solid #111; outline-offset:-2px; }
     tr.selectedRow{ outline:3px solid #111; outline-offset:-3px; }
@@ -128,14 +132,13 @@
     .bad{ color:#c00; font-weight:900; }
 
     /* table width tuning (요청 반영) */
-th.colIdx, td.colIdx { width: 15px; }           /* # 칸: 50% */
-th.colTime, td.colTime { width: 60px; }         /* 시간 칸: 70% (110px -> 77px) */
-td.colTime { font-size: 8px; }                  /* 시간 숫자 텍스트: 70% (11.5px -> 약 8px) */
+    th.colIdx, td.colIdx { width: 15px; }
+    th.colTime, td.colTime { width: 60px; }
+    td.colTime { font-size: 8px; }
 
-th.colKo, td.colKo { width: 300px; }            /* 원문(한글): 85% (360px -> 306px) */
-th.colJp, td.colJp { width: 360px; }            /* 치환(일본어) 유지 */
-th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
-
+    th.colKo, td.colKo { width: 300px; }
+    th.colJp, td.colJp { width: 360px; }
+    th.colStat, td.colStat { width: 100px; }
 
     .jpEdit{
       width:100%;
@@ -203,6 +206,7 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
           <li><b>숫자+문장(예: 43 こうして…)</b>은 오른쪽에서 자동으로 <b>숫자/본문 줄 분리</b></li>
           <li>“<b>제목(한글)</b>” 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력</li>
           <li><b>숫자만 블록(1,2,3...)</b>은 <b>[오프닝 멘트] 이전까지만</b> DOCX 원고(1 〜)로 대체</li>
+          <li><b>병합 매칭</b>: 현재 행 FAIL인데, DOCX가 (현재+다음)으로 95%급 매칭되면 현재 행에 일본어 2개를 넣고 <b>연노랑 표시</b>합니다.</li>
         </ul>
       </div>
     </div>
@@ -414,6 +418,16 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
     return s.startsWith("[오프닝 멘트]") || s.startsWith("[오프닝멘트]") || s.startsWith("[오프닝") || s.startsWith("오프닝 멘트");
   }
 
+  // 병합 대상으로 삼을 수 있는 SRT 바디인지
+  function isMergeCandidateBody(body) {
+    const s = (body || "").trim();
+    if (!s) return false;
+    if (isTitleMarker(s)) return false;
+    if (isNumericOnlyBody(s)) return false;
+    if (isOpeningMarker(s)) return false;
+    return true;
+  }
+
   // SRT 파일명에서 8자리 날짜 우선 추출
   function computeSrtBaseName(filename) {
     const name = (filename || "").replace(/^.*[\\/]/, "");
@@ -487,6 +501,30 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
     }
     if (bestS >= threshold) return { key: bestK, score: bestS };
     return { key: "", score: bestS };
+  }
+
+  // 한글→일본어 매칭(정확/라벨/퍼지) 공통 함수
+  function matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, threshold) {
+    const n1 = normalizeKo(koBodyRaw);
+    let jp = n1 ? (ko2jp.get(n1) || "") : "";
+    let special = "";
+    let usedKey = "";
+
+    let n2 = "";
+    if (!jp) {
+      n2 = normalizeKo(cleanKoKey(koBodyRaw));
+      if (n2) jp = ko2jp.get(n2) || "";
+    }
+    if (!jp) {
+      const base = n2 || n1;
+      const best = findBestKoKey(base, koKeys, threshold);
+      if (best.key) {
+        jp = ko2jp.get(best.key) || "";
+        special = `FUZZY ${best.score.toFixed(2)}`;
+        usedKey = best.key;
+      }
+    }
+    return { jp, special, usedKey };
   }
 
   // ===== DOCX: title/passage extraction (タイトル / 本　　文) =====
@@ -737,6 +775,9 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
     if (r.ok) tr.classList.remove("unmatched");
     else tr.classList.add("unmatched");
 
+    if (r.mergeWarn) tr.classList.add("mergeWarn");
+    else tr.classList.remove("mergeWarn");
+
     const statTd = tr.querySelector("td.colStat");
     if (!statTd) return;
 
@@ -755,6 +796,7 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
       const tr = document.createElement("tr");
       tr.classList.add("clickable");
       if (!r.ok) tr.classList.add("unmatched");
+      if (r.mergeWarn) tr.classList.add("mergeWarn");
       tr.dataset.reportIndex = String(i);
 
       const jpInitial = r.jp || "";
@@ -795,9 +837,6 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
 
     const idx = Number(ta.dataset.jpIndex);
     if (!Number.isFinite(idx) || !lastReport[idx]) return;
-
-    // 빈줄 일괄 제거(원하면 여기서 강제 적용)
-    // ta.value = removeBlankLinesAggressive(ta.value);
 
     lastReport[idx].jpEdited = ta.value;
 
@@ -866,7 +905,7 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
     insertToFocusedTextarea(text);
   });
 
-  // 핵심: SRT 타이밍/블록 그대로, 블록별 문장만 매칭 + FUZZY
+  // 핵심: SRT 타이밍/블록 그대로, 블록별 문장만 매칭 + FUZZY + (현재+다음 병합 0.95)
   function convertAll_SrtTimingFixed(srtItems, ko2jp, koKeys) {
     const out = [];
     const report = [];
@@ -888,6 +927,7 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
         report.push({
           idx: item.idx, time: item.time, ko: koBodyRaw,
           jp: jp || "", ok: !!jp,
+          mergeWarn: false,
           special: "TITLE"
         });
         continue;
@@ -902,30 +942,49 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
         report.push({
           idx: item.idx, time: item.time, ko: koBodyRaw,
           jp: jp || "", ok: !!jp,
+          mergeWarn: false,
           special: "NUM"
         });
         continue;
       }
 
-      // (C) 일반: 이 블록 한글로만 매칭
-      const normKey1 = normalizeKo(koBodyRaw);
-      let jp = normKey1 ? (ko2jp.get(normKey1) || "") : "";
+      // (C) 일반: SRT 블록 기준, docx 한글 길이가 달라서 다음 문장과 합치면 매칭되는 케이스 지원
+      let jp = "";
       let special = "";
+      let mergeWarn = false;
 
-      // 라벨형 보정
-      let normKey2 = "";
-      if (!jp) {
-        normKey2 = normalizeKo(cleanKoKey(koBodyRaw));
-        if (normKey2) jp = ko2jp.get(normKey2) || "";
+      // 1) 기본 매칭(기존과 동일) - threshold 0.88
+      {
+        const m = matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, 0.88);
+        jp = m.jp || "";
+        special = m.jp ? (m.special || "") : "";
       }
 
-      // FUZZY (정확매칭 실패 시)
-      if (!jp) {
-        const base = normKey2 || normKey1;
-        const best = findBestKoKey(base, koKeys, 0.88); // 더 느슨하게 하려면 0.85
-        if (best.key) {
-          jp = ko2jp.get(best.key) || "";
-          special = `FUZZY ${best.score.toFixed(2)}`;
+      // 2) ✅ 병합 매칭: 현재가 FAIL이고, (현재+다음)으로 0.95급 매칭되면
+      //    -> 현재 행에 (현재+다음) 일본어를 넣고, 연노랑 표시
+      if (!jp && (i + 1) < srtItems.length) {
+        const nextItem = srtItems[i + 1];
+        const nextKo = (nextItem.body || "").trim();
+
+        if (isMergeCandidateBody(koBodyRaw) && isMergeCandidateBody(nextKo)) {
+          const combinedKo = `${koBodyRaw} ${nextKo}`;
+
+          const mCombined = matchKoToJpWithFuzzy(combinedKo, ko2jp, koKeys, 0.95);
+          if (mCombined.jp) {
+            const mNextStrong = matchKoToJpWithFuzzy(nextKo, ko2jp, koKeys, 0.95);
+
+            const jpParts = [];
+            jpParts.push(mCombined.jp);
+
+            // 다음이 강매칭되면 추가로 붙임(중복 방지)
+            if (mNextStrong.jp && mNextStrong.jp !== mCombined.jp) {
+              jpParts.push(mNextStrong.jp);
+            }
+
+            jp = removeBlankLinesAggressive(jpParts.join("\n"));
+            mergeWarn = true;
+            special = `MERGE+NEXT ${mCombined.special || "OK"}`;
+          }
         }
       }
 
@@ -933,6 +992,7 @@ th.colStat, td.colStat { width: 100px; }        /* 상태 유지 */
       report.push({
         idx: item.idx, time: item.time, ko: koBodyRaw,
         jp: jp || "", ok: !!jp,
+        mergeWarn,
         special: jp ? (special || "") : "FAIL"
       });
     }
