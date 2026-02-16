@@ -563,9 +563,7 @@ function isNumericExpressionBody(body) {
     const num = Number(m[1]);
     const first = (m[2] || "").trim();
 
-    // ✅ 일본어가 반드시 포함 + 한글이 섞이면 제외(= 10 다음이 한글이면 무조건 제외)
-if (!(Number.isFinite(num) && num > 0 && first && hasJapanese(first))) continue;
-if (hasHangul(first)) continue;
+   if (!(Number.isFinite(num) && num > 0 && first && hasJapanese(first))) continue;
 
 
     const buf = [first];
