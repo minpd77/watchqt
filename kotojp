@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SRT 한글→일어 교체 (문장+도입문 병합 + 편집가능)</title>
+
+  <style>
+    :root { --gap: 14px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h2 { margin: 0 0 8px; }
+    .hint { color:#666; font-size: 13px; line-height:1.45; }
+    .topbar {
+      display:flex; gap: var(--gap); flex-wrap: wrap; align-items: flex-end;
+      border:1px solid #e5e5e5; border-radius: 12px; padding: 12px;
+      background:#fafafa;
+    }
+    .topbar .col { min-width: 280px; flex: 1; }
+
+    label { display:block; font-weight:800; margin: 8px 0 6px; }
+    input[type="file"]{ width:100%; }
+
+    .dropzone {
+      border: 2px dashed #999;
+      border-radius: 12px;
+      padding: 14px;
+      background: #fff;
+      cursor: pointer;
+      user-select: none;
+      transition: .15s;
+    }
+    .dropzone b { font-weight: 900; }
+    .dropzone .small { font-size:12px; color:#666; margin-top:6px; line-height:1.35; }
+    .dropzone.dragover { border-color:#111; background:#f1f1f1; }
+
+    .controls { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+    button {
+      padding:10px 14px; border-radius:10px; border:1px solid #333;
+      background:#111; color:#fff; cursor:pointer;
+    }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      background: #fff;
+    }
+
+    .status { margin-top: 8px; font-size: 14px; }
+    .status b { font-weight:900; }
+
+    .grid {
+      margin-top: var(--gap);
+      display:grid; grid-template-columns: 1.15fr 0.85fr; gap: var(--gap);
+      height: calc(100vh - 305px);
+      min-height: 520px;
+    }
+    .panel {
+      border:1px solid #e5e5e5; border-radius: 12px; overflow:hidden;
+      display:flex; flex-direction: column;
+      background:#fff;
+    }
+    .panelHeader {
+      padding:10px 12px; border-bottom:1px solid #eee; background:#fcfcfc;
+      display:flex; align-items:center; justify-content: space-between; gap:10px;
+    }
+    .panelHeader .title { font-weight:900; }
+    .panelHeader .small { font-size: 12px; color:#666; }
+    .panelBody { padding: 12px; overflow:auto; flex:1; }
+
+    textarea {
+      width:100%; min-height: 180px;
+      padding:10px; border-radius:10px; border:1px solid #ccc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      line-height: 1.45;
+    }
+
+    table { width:100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border:1px solid #eee; padding:8px; vertical-align: top; font-size: 13px; }
+    th { background:#fafafa; position: sticky; top: 0; z-index: 2; }
+    tr.unmatched { background: #ffe5e5; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover { outline: 2px solid #111; outline-offset: -2px; }
+    tr.selectedRow { outline: 3px solid #111; outline-offset: -3px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .ok { color:#0a7; font-weight:900; }
+    .bad { color:#c00; font-weight:900; }
+    .pill {
+      display:inline-block; padding:2px 8px; border-radius: 999px;
+      border:1px solid #ddd; font-size: 12px; color:#444; background:#fff;
+    }
+
+    .cfg { display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
+    .cfg input[type="number"] { width: 90px; padding:6px 8px; border-radius:10px; border:1px solid #ccc; }
+    .cfg input[type="checkbox"] { transform: translateY(1px); }
+
+    pre.docx {
+      margin:0; white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px; line-height: 1.55;
+    }
+    .findBox { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+    .findBox input {
+      width: 220px; padding:6px 10px; border-radius:10px; border:1px solid #ccc;
+    }
+    mark { padding: 0 2px; border-radius: 4px; }
+
+    .jpEdit {
+      width: 100%;
+      min-height: 56px;
+      resize: vertical;
+      padding: 8px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      line-height: 1.35;
+      background: #fff;
+    }
+    .jpEdit.fail { border-color: #c00; background:#fff6f6; }
+    .smallNote { font-size: 12px; color:#666; line-height:1.35; margin-top:8px; }
+  </style>
+
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+</head>
+
+<body>
+  <h2>SRT 한글 → 일본어 자동 교체 (DOCX 기반)</h2>
+  <div class="hint">
+    - 변경1: “민수기 18장 20절을 보면,” 같은 <b>도입문 블록</b>은 다음 문장과 자동 병합<br/>
+    - 변경2: 매칭 상세의 <b>치환(일본어)</b> 칸을 직접 수정 가능 → 다운로드 시 반영
+  </div>
+
+  <div class="topbar">
+    <div class="col">
+      <div id="dropzone" class="dropzone" tabindex="0">
+        <b>여기에 SRT 또는 DOCX 파일을 드래그&드롭</b><br/>
+        <div class="small">또는 아래에서 파일 선택 / 최근 파일 선택</div>
+      </div>
+
+      <label>1) SRT 파일(한국어)</label>
+      <input id="srtFile" type="file" accept=".srt,text/plain" />
+
+      <label>최근 SRT</label>
+      <select id="recentSrt" disabled>
+        <option value="">(없음)</option>
+      </select>
+    </div>
+
+    <div class="col">
+      <label>2) Word 번역 파일(.docx)</label>
+      <input id="docxFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+
+      <label>최근 DOCX</label>
+      <select id="recentDocx" disabled>
+        <option value="">(없음)</option>
+      </select>
+    </div>
+
+    <div class="col" style="min-width: 360px;">
+      <div class="cfg">
+        <span class="pill">문장 병합 최대 블록</span>
+        <input id="maxSentenceMerge" type="number" min="2" max="40" value="12" />
+
+        <span class="pill">도입문 자동 병합</span>
+        <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
+          <input id="mergeIntro" type="checkbox" checked />
+          ON
+        </label>
+
+        <span class="pill">문장 끝(마침표) 우선</span>
+        <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
+          <input id="preferSentenceEnd" type="checkbox" checked />
+          ON
+        </label>
+
+        <span class="pill">[オープニングコメント] 제거</span>
+        <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
+          <input id="dropOpeningLabel" type="checkbox" checked />
+          ON
+        </label>
+      </div>
+
+      <div class="controls">
+        <button id="runBtn" disabled>변환 실행</button>
+        <button id="dlBtn" disabled>결과 SRT 다운로드</button>
+      </div>
+      <div class="status" id="status">파일을 올려주세요.</div>
+      <div class="smallNote">
+        ※ 다운로드는 “표에서 수정한 일본어”를 우선 적용합니다. (OK/FAIL 모두 수정 가능)
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panelHeader">
+        <div>
+          <div class="title">결과(왼쪽)</div>
+          <div class="small">상단: 최종 SRT(미리보기) / 하단: 매칭 상세(일본어 편집 가능)</div>
+        </div>
+        <div class="small" id="leftStat"></div>
+      </div>
+
+      <div class="panelBody">
+        <label style="margin:0 0 6px;">최종 SRT 미리보기 (다운로드 기준)</label>
+        <textarea id="outSrt" spellcheck="false" placeholder="변환 실행 후 결과가 표시됩니다. 표에서 일본어를 수정하면 자동으로 반영됩니다."></textarea>
+
+        <div class="smallNote">
+          팁: 여기(outSrt)를 직접 수정해도 다운로드에 반영됩니다. (표 수정이 우선 적용되도록 자동 갱신됨)
+        </div>
+
+        <div class="pill" style="margin-top:12px;">매칭 상세 (행 클릭 → 오른쪽 DOCX 하이라이트/이동)</div>
+
+        <div style="max-height: 400px; overflow:auto; border:1px solid #eee; border-radius: 12px; margin-top:8px;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:64px;">#</th>
+                <th style="width:220px;">시간</th>
+                <th>원문(한글, 병합됨)</th>
+                <th style="width:360px;">치환(일본어, 편집)</th>
+                <th style="width:120px;">상태</th>
+              </tr>
+            </thead>
+            <tbody id="detailBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panelHeader">
+        <div>
+          <div class="title">DOCX 원문(오른쪽)</div>
+          <div class="small">스크롤/검색</div>
+        </div>
+        <div class="findBox">
+          <input id="docFind" type="text" placeholder="오른쪽 내용 검색(하이라이트)" />
+          <button id="findBtn" disabled style="background:#fff;color:#111;border:1px solid #333;">찾기</button>
+          <button id="clearFindBtn" disabled style="background:#fff;color:#111;border:1px solid #333;">해제</button>
+        </div>
+      </div>
+      <div class="panelBody">
+        <pre id="docxView" class="docx">(DOCX 파일을 올리면 여기에 내용이 표시됩니다)</pre>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  const recent = { srt: [], docx: [] };
+  let srtText = "";
+  let docxText = "";
+  let lastBlocks = []; // [{idx,time,body}] final blocks for output
+  let lastReport = []; // rows for table & edit
+  let selectedRowIndex = -1;
+
+  const statusEl = $("status");
+  const runBtn = $("runBtn");
+  const dlBtn = $("dlBtn");
+  const outSrt = $("outSrt");
+  const detailBody = $("detailBody");
+  const leftStat = $("leftStat");
+
+  const docxView = $("docxView");
+  const docFind = $("docFind");
+  const findBtn = $("findBtn");
+  const clearFindBtn = $("clearFindBtn");
+
+  const recentSrtSel = $("recentSrt");
+  const recentDocxSel = $("recentDocx");
+  const dropzone = $("dropzone");
+
+  function setStatus(html) { statusEl.innerHTML = html; }
+  function canRun() { return srtText.trim().length > 0 && docxText.trim().length > 0; }
+  function updateRunBtn() { runBtn.disabled = !canRun(); }
+
+  function upsertRecent(list, item) {
+    const idx = list.findIndex(x => x.name === item.name);
+    if (idx >= 0) list.splice(idx, 1);
+    list.unshift(item);
+    if (list.length > 8) list.length = 8;
+  }
+  function refreshRecentSelects() {
+    recentSrtSel.innerHTML = `<option value="">(선택)</option>` +
+      recent.srt.map((x, i) => `<option value="${i}">${x.name}</option>`).join("");
+    recentSrtSel.disabled = recent.srt.length === 0;
+
+    recentDocxSel.innerHTML = `<option value="">(선택)</option>` +
+      recent.docx.map((x, i) => `<option value="${i}">${x.name}</option>`).join("");
+    recentDocxSel.disabled = recent.docx.length === 0;
+  }
+
+  // --------- helpers ----------
+  function hasHangul(str) { return /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(str); }
+
+  function normalizeKo(str) {
+    return (str || "")
+      .replace(/\uFEFF/g, "")
+      .replace(/[“”"]/g, "")
+      .replace(/\s+/g, "")
+      .replace(/[·…]/g, "")
+      .trim();
+  }
+
+  function cleanKoKey(line) {
+    const m = line.match(/^(.{1,30})\s*:\s*(.+)$/);
+    if (m) {
+      const left = m[1].trim();
+      const right = m[2].trim();
+      if (left.startsWith("[") && left.endsWith("]")) return right;
+      if (left.length <= 8) return right;
+    }
+    return line.trim();
+  }
+
+  function normalizeTimeLine(t) { return (t || "").trim(); }
+
+  function splitTimeRange(timeLine) {
+    const parts = timeLine.split("-->").map(s => s.trim());
+    return { start: parts[0] || "", end: parts[1] || "" };
+  }
+
+  // 문장 끝(한글 자막 기준)
+  function looksSentenceEnded(rawText) {
+    const s = (rawText || "").trim();
+    if (!s) return false;
+    const tail = s.replace(/[”"'\s]+$/g, "");
+    return /[\.。\!\?…]+$/.test(tail);
+  }
+
+  // “도입문” 판단: (짧고) “…장 …절 …” “을 보면/를 보면/을 보시면/을 보라/를 보라/을 보면,” 류
+  function isIntroVerseLine(koMergedRaw) {
+    const s = (koMergedRaw || "").replace(/\s+/g, " ").trim();
+    if (!s) return false;
+    // 너무 길면 도입문으로 안 봄
+    if (s.length > 40) return false;
+
+    const hasChapVerse = /(\d+)\s*장.*?(\d+)\s*절/.test(s);
+    if (!hasChapVerse) return false;
+
+    const hasCue = /(을|를)\s*보(면|시?면)|을\s*보라|를\s*보라|을\s*살펴보면|를\s*살펴보면/.test(s);
+    // 끝이 쉼표/마침표/따옴표 등으로 끝나도 도입문일 수 있음
+    return hasCue || /을\s*보면,?$/.test(s) || /를\s*보면,?$/.test(s);
+  }
+
+  // --------- Parse SRT ----------
+  function parseSrt(text) {
+    const blocks = text.replace(/\r/g, "").split(/\n\s*\n/);
+    const items = [];
+    for (const blk of blocks) {
+      const lines = blk.split("\n");
+      if (lines.length < 2) continue;
+      const time = normalizeTimeLine(lines[1] || "");
+      const body = lines.slice(2).join("\n").trim();
+      if (!time.includes("-->")) continue;
+      items.push({ time, body });
+    }
+    return items;
+  }
+
+  // --------- DOCX dictionary build ----------
+  function stripJpLabels(jpLines, dropOpeningLabel) {
+    const out = [];
+    for (let ln of jpLines) {
+      ln = (ln || "").trim();
+      if (!ln) continue;
+      if (dropOpeningLabel && /^\[オープニングコメント\]\s*:/i.test(ln)) continue;
+      out.push(ln);
+    }
+    return out.join("\n").trim();
+  }
+
+  function buildKoToJpMap(docText, dropOpeningLabel) {
+    const lines = docText.replace(/\r/g, "").split("\n").map(x => x.trim());
+    const map = new Map();
+
+    let currentKo = null;
+    let jpBuf = [];
+
+    function flush() {
+      if (!currentKo) return;
+      const koKey = normalizeKo(cleanKoKey(currentKo));
+      const jpText = stripJpLabels(jpBuf, dropOpeningLabel);
+      if (koKey && jpText) {
+        if (!map.has(koKey)) map.set(koKey, jpText);
+      }
+      currentKo = null;
+      jpBuf = [];
+    }
+
+    for (const ln of lines) {
+      if (!ln) continue;
+      if (hasHangul(ln)) { flush(); currentKo = ln; }
+      else { if (currentKo) jpBuf.push(ln); }
+    }
+    flush();
+    return map;
+  }
+
+  // --------- 핵심 변환 (문장 병합 + 도입문 추가 병합) ----------
+  function convertSentencePlusIntroMerge(srtItems, ko2jp, opts) {
+    const out = [];
+    const report = [];
+
+    const MAX = Math.max(2, Math.min(40, Number(opts.maxSentenceMerge) || 12));
+    const preferSentenceEnd = !!opts.preferSentenceEnd;
+    const mergeIntro = !!opts.mergeIntro;
+
+    let i = 0;
+    let newIndex = 1;
+
+    while (i < srtItems.length) {
+      // 1) i에서 시작해 문장 끝까지(또는 MAX까지) 병합하여 "기본 문장 덩어리"를 만든다
+      let mergedNorm = "";
+      let mergedRaw = "";
+      const candidates = [];
+      let firstSentenceEndLen = -1;
+
+      for (let k = 0; k < MAX && (i + k) < srtItems.length; k++) {
+        const partRaw = srtItems[i + k].body || "";
+        const partNorm = normalizeKo(partRaw);
+
+        mergedNorm += partNorm;
+        mergedRaw += (k === 0 ? "" : "\n") + partRaw;
+
+        const isEnd = looksSentenceEnded(partRaw);
+        if (isEnd && firstSentenceEndLen === -1) firstSentenceEndLen = k + 1;
+
+        candidates.push({
+          mergeLen: k + 1,
+          norm: mergedNorm,
+          raw: mergedRaw,
+          isSentenceEnd: isEnd
+        });
+      }
+
+      const ordered = preferSentenceEnd
+        ? [...candidates].sort((a,b) => {
+            if (a.isSentenceEnd !== b.isSentenceEnd) return a.isSentenceEnd ? -1 : 1;
+            return a.mergeLen - b.mergeLen;
+          })
+        : candidates;
+
+      // 2) 매칭 시도 (기본 후보들에서)
+      let bestMatch = null;
+      for (const c of ordered) {
+        if (c.norm && ko2jp.has(c.norm)) { bestMatch = { ...c, jp: ko2jp.get(c.norm) }; break; }
+      }
+
+      // 3) 출력 병합 길이 결정: 매칭되면 그 길이 / 아니면 문장 끝까지
+      let outLen = bestMatch ? bestMatch.mergeLen : (firstSentenceEndLen !== -1 ? firstSentenceEndLen : 1);
+
+      // 4) 도입문 추가 병합 규칙:
+      //    - 현재 outLen 덩어리가 “도입문”이고 (짧고) 다음 블록이 존재하면
+      //    - outLen + (다음 문장 덩어리) 만큼 더 합쳐서 한번 더 매칭을 시도
+      if (mergeIntro) {
+        // 현재 rawKo를 만들고 도입문인지 판단
+        let rawKoNow = "";
+        for (let k = 0; k < outLen; k++) rawKoNow += (k===0?"":"\n") + (srtItems[i+k].body||"");
+        rawKoNow = rawKoNow.trim();
+
+        if (isIntroVerseLine(rawKoNow) && (i + outLen) < srtItems.length) {
+          // 다음 문장 덩어리 길이를 계산 (다음 위치에서 문장 끝까지)
+          let j = i + outLen;
+          let nextLen = 1;
+          // 다음 문장 끝 찾기
+          for (let k = 0; k < MAX && (j + k) < srtItems.length; k++) {
+            if (looksSentenceEnded(srtItems[j + k].body || "")) { nextLen = k + 1; break; }
+            nextLen = k + 1;
+          }
+
+          // 합쳐서 매칭 시도
+          let rawKo2 = rawKoNow;
+          let norm2 = normalizeKo(rawKoNow);
+
+          for (let k = 0; k < nextLen; k++) {
+            rawKo2 += "\n" + (srtItems[j + k].body || "");
+            norm2 += normalizeKo(srtItems[j + k].body || "");
+          }
+          rawKo2 = rawKo2.trim();
+
+          if (ko2jp.has(norm2)) {
+            // 도입문+다음문장 통합 매칭 성공
+            bestMatch = { mergeLen: outLen + nextLen, jp: ko2jp.get(norm2), norm: norm2, raw: rawKo2 };
+            outLen = outLen + nextLen;
+          } else {
+            // 매칭이 안 돼도 “도입문은 다음과 합치고 싶다” 요구 반영:
+            // 도입문이면 무조건 다음문장까지는 합친 1블록으로 출력(FAIL이어도)
+            outLen = outLen + nextLen;
+          }
+        }
+      }
+
+      // 5) 최종 rawKo 구성 (outLen 기준)
+      let rawKo = "";
+      for (let k = 0; k < outLen; k++) rawKo += (k===0?"":"\n") + (srtItems[i+k].body||"");
+      rawKo = rawKo.trim();
+
+      const first = srtItems[i];
+      const last = srtItems[i + outLen - 1];
+      const t1 = splitTimeRange(first.time);
+      const t2 = splitTimeRange(last.time);
+      const newTime = `${t1.start} --> ${t2.end}`;
+
+      if (bestMatch && bestMatch.mergeLen === outLen) {
+        const idx = String(newIndex++);
+        out.push({ idx, time: newTime, body: bestMatch.jp });
+        report.push({
+          idx, time: newTime,
+          ko: rawKo,
+          jp: bestMatch.jp,
+          ok: true,
+          mergedFrom: outLen
+        });
+      } else {
+        const idx = String(newIndex++);
+        out.push({ idx, time: newTime, body: rawKo }); // FAIL은 한글 그대로(병합된 형태)
+        report.push({
+          idx, time: newTime,
+          ko: rawKo,
+          jp: "", // 편집용
+          ok: false,
+          mergedFrom: outLen
+        });
+      }
+
+      i += outLen;
+    }
+
+    return { out, report };
+  }
+
+  // --------- DOCX view ----------
+  function escapeHtml(s) {
+    return (s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+  function setDocxView(text) { docxView.innerHTML = escapeHtml(text || ""); }
+
+  function highlightInDocx(query) {
+    const raw = docxText || "";
+    if (!query || !query.trim()) { setDocxView(raw); return false; }
+
+    const q = query.trim();
+    const esc = escapeHtml(raw);
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const replaced = esc.replace(re, (m) => `<mark>${m}</mark>`);
+    if (replaced === esc) { docxView.innerHTML = esc; return false; }
+
+    docxView.innerHTML = replaced;
+    const first = docxView.querySelector("mark");
+    if (first) first.scrollIntoView({ block: "center" });
+    return true;
+  }
+
+  function makeDocxAnchorFromKo(koRaw) {
+    const raw = (koRaw || "").trim();
+    if (!raw) return "";
+
+    const lines = raw.split("\n").map(s => s.trim()).filter(Boolean);
+    const hangulLines = lines.filter(hasHangul).map(cleanKoKey);
+
+    let bestLine = "";
+    for (const ln of hangulLines) if (ln.length > bestLine.length) bestLine = ln;
+
+    if (bestLine.length > 70) bestLine = bestLine.slice(0, 70);
+    bestLine = bestLine.replace(/[“”"]/g, "").trim();
+    return bestLine;
+  }
+
+  // --------- output rebuild (table edits -> SRT) ----------
+  function rebuildOutSrtFromBlocks() {
+    // lastBlocks + lastReport(jp edits) 반영
+    // 규칙: 일본어 칸에 값이 있으면 그걸 최종 body로 사용
+    //      없으면 lastBlocks의 body(OK면 jp, FAIL이면 ko)가 사용됨
+    const lines = [];
+    for (let i = 0; i < lastBlocks.length; i++) {
+      const b = lastBlocks[i];
+      const r = lastReport[i];
+      const edited = (r && typeof r.jpEdited === "string") ? r.jpEdited.trim() : "";
+      const body = edited ? edited : b.body;
+      lines.push(`${b.idx}\n${b.time}\n${body}`);
+    }
+    const srtOut = lines.join("\n\n");
+    outSrt.value = srtOut;
+    return srtOut;
+  }
+
+  function clearSelectedRow() {
+    const prev = detailBody.querySelector("tr.selectedRow");
+    if (prev) prev.classList.remove("selectedRow");
+    selectedRowIndex = -1;
+  }
+
+  // --------- render table ----------
+  function renderReport(report) {
+    detailBody.innerHTML = "";
+    lastReport = report;
+
+    let okCount = 0, badCount = 0;
+
+    for (let i = 0; i < report.length; i++) {
+      const r = report[i];
+      const tr = document.createElement("tr");
+      tr.classList.add("clickable");
+      if (!r.ok) tr.classList.add("unmatched");
+      tr.dataset.reportIndex = String(i);
+
+      const jpInitial = r.jp || "";
+      r.jpEdited = jpInitial; // 초기값 (OK는 jp, FAIL은 "")
+
+      tr.innerHTML = `
+        <td class="mono">${r.idx}</td>
+        <td class="mono">${r.time}</td>
+        <td class="mono">${r.ko || ""}</td>
+        <td>
+          <textarea class="jpEdit ${r.ok ? "" : "fail"}" data-jp-index="${i}" spellcheck="false"
+            placeholder="${r.ok ? "필요하면 일본어를 수정하세요" : "여기에 일본어를 직접 입력(FAIL 해결)"}">${jpInitial}</textarea>
+        </td>
+        <td>
+          ${r.ok
+            ? `<span class="ok">OK</span><div class="mono" style="font-size:12px;color:#666;">merge:${r.mergedFrom}</div>`
+            : `<span class="bad">FAIL</span><div class="mono" style="font-size:12px;color:#666;">merge:${r.mergedFrom}</div>`
+          }
+        </td>
+      `;
+      detailBody.appendChild(tr);
+
+      if (r.ok) okCount++; else badCount++;
+    }
+
+    leftStat.textContent = `OK ${okCount} / FAIL ${badCount}`;
+    setStatus(`변환 완료: <b>성공 ${okCount}</b> / <b>실패 ${badCount}</b> (일본어 칸 수정 후 다운로드 가능)`);
+
+    // 초기 outSrt 생성
+    rebuildOutSrtFromBlocks();
+  }
+
+  // textarea 수정 시 jpEdited 갱신 + outSrt 재생성
+  detailBody.addEventListener("input", (e) => {
+    const ta = e.target.closest("textarea.jpEdit");
+    if (!ta) return;
+    const idx = Number(ta.dataset.jpIndex);
+    if (!Number.isFinite(idx) || !lastReport[idx]) return;
+    lastReport[idx].jpEdited = ta.value;
+    rebuildOutSrtFromBlocks();
+  });
+
+  // 행 클릭: DOCX 하이라이트
+  detailBody.addEventListener("click", (e) => {
+    // textarea 클릭은 편집에 집중, 행 선택/하이라이트만 유지
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+
+    const idx = Number(tr.dataset.reportIndex);
+    const row = lastReport[idx];
+    if (!row) return;
+
+    // 선택 표시
+    const prev = detailBody.querySelector("tr.selectedRow");
+    if (prev) prev.classList.remove("selectedRow");
+    tr.classList.add("selectedRow");
+    selectedRowIndex = idx;
+
+    const anchor = makeDocxAnchorFromKo(row.ko);
+    if (!anchor) return;
+    docFind.value = anchor;
+
+    const ok = highlightInDocx(anchor);
+    if (!ok) {
+      const compact = anchor.replace(/\s+/g, "");
+      if (compact !== anchor) highlightInDocx(compact);
+    }
+  });
+
+  // --------- download ----------
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  // --------- loaders ----------
+  async function loadSrtFromFile(file) {
+    const text = await file.text();
+    srtText = text;
+    upsertRecent(recent.srt, { name: file.name, text });
+    refreshRecentSelects();
+    setStatus(`SRT 로드됨: <b>${file.name}</b>`);
+    updateRunBtn();
+  }
+
+  async function loadDocxFromFile(file) {
+    const arrBuf = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer: arrBuf });
+    const text = (result.value || "").trim();
+    docxText = text;
+
+    upsertRecent(recent.docx, { name: file.name, text });
+    refreshRecentSelects();
+
+    setDocxView(docxText);
+    findBtn.disabled = docxText.length === 0;
+    clearFindBtn.disabled = docxText.length === 0;
+
+    setStatus(`DOCX 로드됨: <b>${file.name}</b>`);
+    updateRunBtn();
+  }
+
+  // --------- inputs ----------
+  $("srtFile").addEventListener("change", async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    await loadSrtFromFile(f);
+  });
+
+  $("docxFile").addEventListener("change", async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    await loadDocxFromFile(f);
+  });
+
+  recentSrtSel.addEventListener("change", () => {
+    const v = recentSrtSel.value;
+    if (v === "") return;
+    const item = recent.srt[Number(v)];
+    if (!item) return;
+    srtText = item.text;
+    setStatus(`최근 SRT 선택: <b>${item.name}</b>`);
+    updateRunBtn();
+  });
+
+  recentDocxSel.addEventListener("change", () => {
+    const v = recentDocxSel.value;
+    if (v === "") return;
+    const item = recent.docx[Number(v)];
+    if (!item) return;
+    docxText = item.text;
+    setDocxView(docxText);
+    setStatus(`최근 DOCX 선택: <b>${item.name}</b>`);
+    findBtn.disabled = docxText.length === 0;
+    clearFindBtn.disabled = docxText.length === 0;
+    updateRunBtn();
+  });
+
+  // --------- dropzone ----------
+  function handleDropFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    for (const f of files) {
+      const name = (f.name || "").toLowerCase();
+      if (name.endsWith(".srt")) loadSrtFromFile(f);
+      else if (name.endsWith(".docx")) loadDocxFromFile(f);
+    }
+  }
+
+  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    handleDropFiles(e.dataTransfer.files);
+  });
+
+  dropzone.addEventListener("click", () => {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.multiple = true;
+    picker.accept = ".srt,.docx";
+    picker.onchange = () => handleDropFiles(picker.files);
+    picker.click();
+  });
+
+  // --------- right search ----------
+  $("findBtn").addEventListener("click", () => highlightInDocx(docFind.value));
+  $("clearFindBtn").addEventListener("click", () => { docFind.value = ""; setDocxView(docxText); });
+
+  // --------- actions ----------
+  runBtn.addEventListener("click", () => {
+    try {
+      clearSelectedRow();
+      const srtItems = parseSrt(srtText);
+
+      const dropOpeningLabel = $("dropOpeningLabel").checked;
+      const ko2jp = buildKoToJpMap(docxText, dropOpeningLabel);
+
+      const opts = {
+        maxSentenceMerge: $("maxSentenceMerge").value,
+        preferSentenceEnd: $("preferSentenceEnd").checked,
+        mergeIntro: $("mergeIntro").checked,
+      };
+
+      setStatus(`처리 중... (SRT <b>${srtItems.length}</b>블록 / 사전 <b>${ko2jp.size}</b>쌍 / 문장병합max <b>${opts.maxSentenceMerge}</b>)`);
+
+      const { out, report } = convertSentencePlusIntroMerge(srtItems, ko2jp, opts);
+
+      lastBlocks = out;     // 최종 출력 블록(기본)
+      renderReport(report); // 표 + 편집
+      dlBtn.disabled = false;
+    } catch (err) {
+      console.error(err);
+      setStatus(`<span style="color:#c00;font-weight:900;">오류:</span> ${(err?.message || String(err))}`);
+    }
+  });
+
+  dlBtn.addEventListener("click", () => {
+    // 다운로드 직전, 표 편집 기준으로 outSrt 재생성 후 저장
+    const content = rebuildOutSrtFromBlocks();
+    if (!content.trim()) return;
+    const stamp = new Date().toISOString().slice(0,10).replaceAll("-","");
+    downloadText(`converted_${stamp}.srt`, content);
+  });
+
+})();
+</script>
+</body>
+</html>
