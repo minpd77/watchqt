@@ -572,37 +572,47 @@ function isNumericExpressionBody(body) {
 
   // ===== DOCX: extract manuscript numbered JP lines BEFORE opening marker in DOCX =====
   function extractManuscriptNumberedJP(docRaw) {
-    const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim());
-    const map = new Map();
+  const lines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trim());
+  const map = new Map();
 
-    for (let i = 0; i < lines.length; i++) {
-      const ln = lines[i];
-      if (!ln) continue;
+  // ✅ 10. / 10． / 10) / 10: / 10 - / 10　 / 10(공백없음) 까지 허용
+  const numRe = /^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)$/;
 
-      // DOCX에서 오프닝 멘트 등장하면 그 이전까지만 원고숫자 사용
-      if (hasHangul(ln) && isOpeningMarker(ln)) break;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (!ln) continue;
 
-      const m = ln.match(/^(\d{1,3})\s+(.+)$/);
-      if (!m) continue;
+    // DOCX에서 오프닝 멘트 등장하면 그 이전까지만 원고숫자 사용
+    if (hasHangul(ln) && isOpeningMarker(ln)) break;
 
-      const num = Number(m[1]);
-      const rest = (m[2] || "").trim();
-      if (!(Number.isFinite(num) && num > 0 && rest && hasJapanese(rest))) continue;
+    const m = ln.match(numRe);
+    if (!m) continue;
 
-      let buf = [rest];
-      for (let j = i + 1; j < lines.length; j++) {
-        const nx = lines[j].trim();
-        if (!nx) break;
-        if (hasHangul(nx) && isOpeningMarker(nx)) break;
-        const nxNum = nx.match(/^(\d{1,3})\s+(.+)$/);
-        if (nxNum) break;
-        buf.push(nx);
-        i = j;
-      }
-      map.set(num, buf.join("\n").trim());
+    const num = Number(m[1]);
+    const rest = (m[2] || "").trim();
+
+    if (!(Number.isFinite(num) && num > 0 && rest && hasJapanese(rest))) continue;
+
+    let buf = [rest];
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const nx = lines[j].trim();
+      if (!nx) break;
+      if (hasHangul(nx) && isOpeningMarker(nx)) break;
+
+      // 다음 번호 시작이면 끊기
+      const nxNum = nx.match(numRe);
+      if (nxNum && Number(nxNum[1]) !== num) break;
+
+      buf.push(nx);
+      i = j;
     }
-    return map;
+
+    map.set(num, buf.join("\n").trim());
   }
+
+  return map;
+}
 
   // ===== KO->JP dict build =====
   function stripJpLabels(jpLines, dropOpeningLabel) {
@@ -667,7 +677,7 @@ function isNumericExpressionBody(body) {
       const ln = (ln0 || "").trim();
       if (!ln) { step1.push(""); continue; }
 
-      const m = ln.match(/^(\d{1,3})\s+(.+)$/);
+      const m = ln.match(/^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)$/);
       if (m) {
         const num = m[1];
         const rest = (m[2] || "").trim();
