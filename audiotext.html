@@ -11,7 +11,6 @@
     margin-top: 80px;
   }
 
-  /* 마이크 + 안내문구를 한 줄로 */
   #micRow{
     display: inline-flex;
     align-items: center;
@@ -31,7 +30,6 @@
     flex: 0 0 auto;
   }
 
-  /* 마이크 오른쪽, 빨간 글씨, 크기 250% */
   #recordHint {
     display: none;
     color: red;
@@ -39,7 +37,7 @@
     font-weight: 800;
     line-height: 1.2;
     text-align: left;
-    white-space: pre-line; /* 줄바꿈 그대로 */
+    white-space: pre-line;
   }
 
   #copyButton {
@@ -56,7 +54,6 @@
     font-size: 18px;
   }
 
-  /* 전체화면 복사 알림 */
   #copyAlert {
     position: fixed;
     top: 0;
@@ -72,7 +69,6 @@
     z-index: 9999;
   }
 
-  /* 옵션 바 */
   #optionsBar {
     margin-top: 16px;
     display: inline-flex;
@@ -92,7 +88,7 @@
 <div id="micRow">
   <button id="micButton">🎤</button>
   <div id="recordHint">인식중...
-음성 받아쓰기 중.... 마이크를 누르면 종료됩니다.</div>
+음성 받아쓰기 중.... 마이크를 누르면 종료 됩니다.</div>
 </div>
 
 <br>
@@ -135,8 +131,18 @@ let recognizing = false;
 let shouldAutoRestart = false;
 
 // 텍스트 버퍼
-let finalText = "";     // 확정(최종) 누적
-let interimText = "";   // 말하는 중간(임시)
+let finalText = "";
+let interimText = "";
+
+// ✅ “침묵 최대 2초” 규칙
+const MAX_SILENCE_MS = 2000;  // 사용자가 이어 말할 수 있도록 최대 대기
+// ✅ 문장 어미 감지되면 빠르게 끊기 (짧은 확정 대기)
+const ENDING_COMMIT_DELAY_MS = 350;
+
+// ✅ 내부 타이머들
+let lastUpdateAt = 0;
+let silenceTimer = null;
+let pendingCommitTimer = null;
 
 // Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -152,7 +158,7 @@ recognition.interimResults = true;
 recognition.maxAlternatives = 1;
 
 /* ---------------------
-   UI 헬퍼
+   UI
 --------------------- */
 function setMicUI(on){
   micButton.style.backgroundColor = on ? "red" : "green";
@@ -165,16 +171,13 @@ function renderOutput(){
 }
 
 /* ---------------------
-   구두점 처리 로직
+   구두점
 --------------------- */
 function normalizeSpaces(s){
   return String(s ?? "").replace(/\s+/g, " ").trim();
 }
 
 function convertSpokenPunctuation(s){
-  // 말로 한 구두점을 기호로 치환 (옵션 ON일 때만)
-  // 예: "쉼표" -> ",", "마침표" -> ".", "물음표" -> "?", "느낌표" -> "!"
-  // 흔한 발화 변형도 일부 포함
   return s
     .replace(/\b쉼표\b/g, ",")
     .replace(/\b콤마\b/g, ",")
@@ -186,61 +189,17 @@ function convertSpokenPunctuation(s){
     .replace(/\b엑스클러메이션\b/g, "!");
 }
 
-function hasTerminalPunct(s){
-  return /[.?!…]+$/.test(s.trim());
-}
-
-function guessTerminalPunctKorean(sentence){
-  // 매우 보수적으로 문장 끝 어미로 . / ? / ! 추정
-  const s = sentence.trim();
-  if (!s) return "";
-
-  // 이미 종결부호면 유지
-  if (hasTerminalPunct(s)) return "";
-
-  // 괄호/따옴표 등 닫힘 처리: 끝에 ) ] } " ' 등이 있어도 판단 가능하도록 분리
-  // 예) "맞나요)" -> core="맞나요", tail=")"
-  const m = s.match(/^(.*?)([)\]\}"'’”]+)?$/);
-  const core = (m && m[1]) ? m[1].trim() : s;
-  const tail = (m && m[2]) ? m[2] : "";
-
-  const c = core;
-
-  // 질문형 어미 패턴
-  if (/(까|나요|니|냐|나요|습니까|인가요|인가|죠\?|지요\?|가요)\s*$/.test(c)) return "?" + tail;
-
-  // 느낌/강조(아주 보수적): 끝이 "!" 말투로 자주 끝나는 케이스만
-  if (/(다!|야!|자!|아!|어!|해!|봐!|좋아!|대박!|진짜!|와!|헐!)\s*$/.test(c)) return "!" + tail;
-
-  // 기본은 마침표
-  return "." + tail;
-}
-
 function applyPunctuationToFinal(text){
   let t = normalizeSpaces(text);
 
   if (spokenPunctEl.checked) {
     t = convertSpokenPunctuation(t);
-    t = t.replace(/\s*([,?.!])\s*/g, "$1 "); // 기호 주변 공백 정리
+    t = t.replace(/\s*([,?.!])\s*/g, "$1 ");
     t = t.replace(/\s+/g, " ").trim();
   }
 
   if (autoPunctEl.checked) {
-    // 문장 끝에 . ? ! 없으면 추정해서 부착
-    // 단, 마지막에 콤마로 끝났으면 마침표 강제하지 않음
     if (!/[.?!…]+$/.test(t) && !/,$/.test(t)) {
-      const add = guessTerminalPunctKorean(t);
-      if (add) t = t + add; // guessTerminalPunctKorean가 tail 포함해서 반환하도록 만들었으니 여기선 덧붙임
-      // 위에서 add에 tail까지 들어가면 중복이 될 수 있어, 현재 구현은 add가 "?)+tail" 형태라서 t+add가 맞지 않음
-      // -> 안전하게 다시 구현: add는 순수 부호만 반환하도록 처리
-    }
-  }
-
-  // 위 코멘트 반영: 안전하게 다시 종결부호 부착
-  if (autoPunctEl.checked) {
-    if (!/[.?!…]+$/.test(t) && !/,$/.test(t)) {
-      // tail 포함 버전 대신, 여기서는 부호만 붙이기 (닫힘문자 뒤에는 부호 못 붙이므로 예외 처리)
-      // 닫힘문자 꼬리 분리
       const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
       const core = (mm && mm[1]) ? mm[1].trim() : t.trim();
       const tail = (mm && mm[2]) ? mm[2] : "";
@@ -253,9 +212,92 @@ function applyPunctuationToFinal(text){
     }
   }
 
-  // 마지막 공백 정리
   t = t.replace(/\s+$/g, "");
   return t;
+}
+
+/* ---------------------
+   ✅ 문장 끝 어미 감지
+   - 너무 공격적이면 자꾸 끊길 수 있어서 “대표 어미” 위주로 보수적으로 잡음
+--------------------- */
+function seemsSentenceEnding(s){
+  const t = normalizeSpaces(s);
+  if (!t) return false;
+
+  // 이미 종결기호 있으면 끝난 걸로
+  if (/[.?!…]+$/.test(t)) return true;
+
+  // 닫힘문자 제거 후 판정
+  const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
+  const core = (mm && mm[1]) ? mm[1].trim() : t.trim();
+
+  // 질문형/서술형/청유/명령/감탄의 대표 어미들
+  // - “요/다/까/죠/네요/습니다/해요/했어요/인가요/될까요” 등
+  return /(입니다|됩니다|합니다|했습니다|하세요|해요|했어요|됐어요|되나요|되죠|되네요|인가요|일까요|될까요|까요|나요|죠|지요|네요|군요|어요|아요|예요|이에요|다)\s*$/.test(core);
+}
+
+/* ---------------------
+   ✅ 강제 확정(줄바꿈) 공통 함수
+--------------------- */
+function commitInterim(reason){
+  if (!interimText) return;
+
+  // pendingCommitTimer가 있으면 중복 방지
+  if (pendingCommitTimer) {
+    clearTimeout(pendingCommitTimer);
+    pendingCommitTimer = null;
+  }
+
+  const processed = applyPunctuationToFinal(interimText);
+  finalText += processed + "\n";
+  interimText = "";
+  renderOutput();
+}
+
+/* ---------------------
+   ✅ 타이머: 1) 최대 2초 침묵이면 확정
+             2) 어미 감지되면 짧게(350ms) 후 확정
+--------------------- */
+function startWatchers(){
+  stopWatchers();
+  lastUpdateAt = Date.now();
+
+  silenceTimer = setInterval(() => {
+    if (!recognizing) return;
+
+    const idle = Date.now() - lastUpdateAt;
+
+    // (A) 최대 2초 침묵이면 확정
+    if (idle >= MAX_SILENCE_MS && interimText) {
+      commitInterim("max-silence");
+      return;
+    }
+
+    // (B) 어미 감지: 아직 말이 이어질 수 있으니 “짧게” 대기 후 확정 예약
+    if (interimText && seemsSentenceEnding(interimText)) {
+      // 이미 예약되어 있으면 유지 (중복 예약 방지)
+      if (!pendingCommitTimer) {
+        pendingCommitTimer = setTimeout(() => {
+          // 예약 후에도 텍스트가 그대로(또는 여전히 어미로 끝)면 확정
+          if (interimText && seemsSentenceEnding(interimText)) {
+            commitInterim("ending");
+          }
+          pendingCommitTimer = null;
+        }, ENDING_COMMIT_DELAY_MS);
+      }
+    } else {
+      // 어미 상태가 아니면 예약 취소
+      if (pendingCommitTimer) {
+        clearTimeout(pendingCommitTimer);
+        pendingCommitTimer = null;
+      }
+    }
+  }, 120);
+}
+
+function stopWatchers(){
+  if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
+  if (pendingCommitTimer) { clearTimeout(pendingCommitTimer); pendingCommitTimer = null; }
 }
 
 /* ---------------------
@@ -267,6 +309,7 @@ function startRecognition(){
     recognizing = true;
     shouldAutoRestart = true;
     setMicUI(true);
+    startWatchers();
   } catch (e) {
     console.warn("startRecognition error:", e);
   }
@@ -279,6 +322,7 @@ function stopRecognition(){
   recognizing = false;
   interimText = "";
   setMicUI(false);
+  stopWatchers();
   renderOutput();
 }
 
@@ -288,20 +332,21 @@ micButton.addEventListener("click", () => {
 });
 
 /* ---------------------
-   음성 결과 처리
+   음성 결과
 --------------------- */
 recognition.onresult = (event) => {
   interimText = "";
+  lastUpdateAt = Date.now();
 
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     const raw = res[0].transcript;
 
     if (res.isFinal) {
+      // 엔진이 확정해준 건 그대로 누적
       const processed = applyPunctuationToFinal(raw);
       finalText += processed + "\n";
     } else {
-      // interim은 너무 가공하면 깜빡임/오판이 생겨서 원문 그대로 표시
       interimText += raw;
     }
   }
@@ -310,7 +355,7 @@ recognition.onresult = (event) => {
 };
 
 /* ---------------------
-   끊김 최소화: 종료되면 자동 재시작
+   자동 재시작
 --------------------- */
 recognition.onend = () => {
   if (shouldAutoRestart) {
@@ -331,10 +376,11 @@ recognition.onerror = (event) => {
   shouldAutoRestart = false;
   recognizing = false;
   setMicUI(false);
+  stopWatchers();
 };
 
 /* ---------------------
-   복사 버튼
+   복사
 --------------------- */
 copyButton.addEventListener("click", async () => {
   const textOnly = copyFinalOnlyEl.checked
@@ -343,17 +389,15 @@ copyButton.addEventListener("click", async () => {
 
   try {
     await navigator.clipboard.writeText(textOnly);
-
     copyAlert.style.display = "flex";
     setTimeout(() => { copyAlert.style.display = "none"; }, 1200);
-
   } catch (err) {
     alert("복사 실패: 브라우저 권한을 확인하세요.");
   }
 });
 
 /* ---------------------
-   페이지 떠날 때 정리
+   정리
 --------------------- */
 window.addEventListener("beforeunload", () => {
   try { recognition.abort(); } catch(e){}
