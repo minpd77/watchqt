@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>음성 받아쓰기</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    margin-top: 80px;
+  }
+
+  #micButton {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    border: none;
+    font-size: 40px;
+    color: white;
+    cursor: pointer;
+    background-color: green;
+  }
+
+  #copyButton {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  #output {
+    margin-top: 30px;
+    width: 80%;
+    height: 200px;
+    font-size: 18px;
+  }
+
+  /* 전체화면 복사 알림 */
+  #copyAlert {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.8);
+    color: white;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    font-size: 40px;
+    z-index: 9999;
+  }
+</style>
+</head>
+<body>
+
+<button id="micButton">🎤</button>
+<br>
+<button id="copyButton">복사하기</button>
+<br>
+<textarea id="output" placeholder="음성이 텍스트로 변환됩니다..."></textarea>
+
+<div id="copyAlert">복사되었습니다!</div>
+
+<script>
+const micButton = document.getElementById("micButton");
+const copyButton = document.getElementById("copyButton");
+const output = document.getElementById("output");
+const copyAlert = document.getElementById("copyAlert");
+
+let recognizing = false;
+
+// Edge + Chrome 지원
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SpeechRecognition) {
+  alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
+}
+
+const recognition = new SpeechRecognition();
+recognition.lang = "ko-KR";
+recognition.continuous = true;
+recognition.interimResults = false;
+
+// 마이크 버튼 클릭
+micButton.addEventListener("click", () => {
+  if (!recognizing) {
+    recognition.start();
+    micButton.style.backgroundColor = "red";
+    recognizing = true;
+  } else {
+    recognition.stop();
+    micButton.style.backgroundColor = "green";
+    recognizing = false;
+  }
+});
+
+// 음성 결과 처리
+recognition.onresult = (event) => {
+  const transcript = event.results[event.results.length - 1][0].transcript;
+  output.value += transcript + "\n";
+};
+
+// 복사 버튼
+copyButton.addEventListener("click", async () => {
+  const textOnly = output.value; // 순수 텍스트만
+
+  try {
+    await navigator.clipboard.writeText(textOnly);
+
+    // 전체화면 알림 표시
+    copyAlert.style.display = "flex";
+
+    setTimeout(() => {
+      copyAlert.style.display = "none";
+    }, 3000);
+
+  } catch (err) {
+    alert("복사 실패: 브라우저 권한을 확인하세요.");
+  }
+});
+
+// 오류 처리
+recognition.onerror = (event) => {
+  console.error("음성 인식 오류:", event.error);
+};
+</script>
+
+</body>
+</html>
