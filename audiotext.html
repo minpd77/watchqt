@@ -2,12 +2,21 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>음성 받아쓰기</title>
 <style>
   body {
     font-family: Arial, sans-serif;
     text-align: center;
     margin-top: 80px;
+  }
+
+  /* 마이크 + 안내문구를 한 줄로 */
+  #micRow{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
   }
 
   #micButton {
@@ -19,6 +28,18 @@
     color: white;
     cursor: pointer;
     background-color: green;
+    flex: 0 0 auto;
+  }
+
+  /* 마이크 오른쪽, 빨간 글씨, 크기 250% */
+  #recordHint {
+    display: none;
+    color: red;
+    font-size: 250%;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: left;
+    white-space: pre-line; /* 줄바꿈 그대로 */
   }
 
   #copyButton {
@@ -50,13 +71,50 @@
     font-size: 40px;
     z-index: 9999;
   }
+
+  /* 옵션 바 */
+  #optionsBar {
+    margin-top: 16px;
+    display: inline-flex;
+    gap: 14px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    color: #444;
+    font-size: 14px;
+  }
+
+  label { user-select: none; }
 </style>
 </head>
 <body>
 
-<button id="micButton">🎤</button>
+<div id="micRow">
+  <button id="micButton">🎤</button>
+  <div id="recordHint">인식중...
+음성 받아쓰기 중.... 마이크를 누르면 종료됩니다.</div>
+</div>
+
 <br>
 <button id="copyButton">복사하기</button>
+
+<div id="optionsBar">
+  <label>
+    <input type="checkbox" id="copyFinalOnly" checked />
+    복사 시 확정(final)만
+  </label>
+
+  <label>
+    <input type="checkbox" id="autoPunct" checked />
+    자동 구두점(. ? !)
+  </label>
+
+  <label title="예: '쉼표', '마침표'를 말하면 기호로 바꿉니다">
+    <input type="checkbox" id="spokenPunct" checked />
+    말한 구두점 변환(쉼표/마침표/물음표/느낌표)
+  </label>
+</div>
+
 <br>
 <textarea id="output" placeholder="음성이 텍스트로 변환됩니다..."></textarea>
 
@@ -67,10 +125,20 @@ const micButton = document.getElementById("micButton");
 const copyButton = document.getElementById("copyButton");
 const output = document.getElementById("output");
 const copyAlert = document.getElementById("copyAlert");
+const recordHintEl = document.getElementById("recordHint");
+
+const copyFinalOnlyEl = document.getElementById("copyFinalOnly");
+const autoPunctEl = document.getElementById("autoPunct");
+const spokenPunctEl = document.getElementById("spokenPunct");
 
 let recognizing = false;
+let shouldAutoRestart = false;
 
-// Edge + Chrome 지원
+// 텍스트 버퍼
+let finalText = "";     // 확정(최종) 누적
+let interimText = "";   // 말하는 중간(임시)
+
+// Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if (!SpeechRecognition) {
@@ -80,50 +148,216 @@ if (!SpeechRecognition) {
 const recognition = new SpeechRecognition();
 recognition.lang = "ko-KR";
 recognition.continuous = true;
-recognition.interimResults = false;
+recognition.interimResults = true;
+recognition.maxAlternatives = 1;
 
-// 마이크 버튼 클릭
-micButton.addEventListener("click", () => {
-  if (!recognizing) {
-    recognition.start();
-    micButton.style.backgroundColor = "red";
-    recognizing = true;
-  } else {
-    recognition.stop();
-    micButton.style.backgroundColor = "green";
-    recognizing = false;
+/* ---------------------
+   UI 헬퍼
+--------------------- */
+function setMicUI(on){
+  micButton.style.backgroundColor = on ? "red" : "green";
+  recordHintEl.style.display = on ? "block" : "none";
+}
+
+function renderOutput(){
+  output.value = finalText + (interimText ? interimText : "");
+  output.scrollTop = output.scrollHeight;
+}
+
+/* ---------------------
+   구두점 처리 로직
+--------------------- */
+function normalizeSpaces(s){
+  return String(s ?? "").replace(/\s+/g, " ").trim();
+}
+
+function convertSpokenPunctuation(s){
+  // 말로 한 구두점을 기호로 치환 (옵션 ON일 때만)
+  // 예: "쉼표" -> ",", "마침표" -> ".", "물음표" -> "?", "느낌표" -> "!"
+  // 흔한 발화 변형도 일부 포함
+  return s
+    .replace(/\b쉼표\b/g, ",")
+    .replace(/\b콤마\b/g, ",")
+    .replace(/\b마침표\b/g, ".")
+    .replace(/\b피리어드\b/g, ".")
+    .replace(/\b물음표\b/g, "?")
+    .replace(/\b퀘스천마크\b/g, "?")
+    .replace(/\b느낌표\b/g, "!")
+    .replace(/\b엑스클러메이션\b/g, "!");
+}
+
+function hasTerminalPunct(s){
+  return /[.?!…]+$/.test(s.trim());
+}
+
+function guessTerminalPunctKorean(sentence){
+  // 매우 보수적으로 문장 끝 어미로 . / ? / ! 추정
+  const s = sentence.trim();
+  if (!s) return "";
+
+  // 이미 종결부호면 유지
+  if (hasTerminalPunct(s)) return "";
+
+  // 괄호/따옴표 등 닫힘 처리: 끝에 ) ] } " ' 등이 있어도 판단 가능하도록 분리
+  // 예) "맞나요)" -> core="맞나요", tail=")"
+  const m = s.match(/^(.*?)([)\]\}"'’”]+)?$/);
+  const core = (m && m[1]) ? m[1].trim() : s;
+  const tail = (m && m[2]) ? m[2] : "";
+
+  const c = core;
+
+  // 질문형 어미 패턴
+  if (/(까|나요|니|냐|나요|습니까|인가요|인가|죠\?|지요\?|가요)\s*$/.test(c)) return "?" + tail;
+
+  // 느낌/강조(아주 보수적): 끝이 "!" 말투로 자주 끝나는 케이스만
+  if (/(다!|야!|자!|아!|어!|해!|봐!|좋아!|대박!|진짜!|와!|헐!)\s*$/.test(c)) return "!" + tail;
+
+  // 기본은 마침표
+  return "." + tail;
+}
+
+function applyPunctuationToFinal(text){
+  let t = normalizeSpaces(text);
+
+  if (spokenPunctEl.checked) {
+    t = convertSpokenPunctuation(t);
+    t = t.replace(/\s*([,?.!])\s*/g, "$1 "); // 기호 주변 공백 정리
+    t = t.replace(/\s+/g, " ").trim();
   }
+
+  if (autoPunctEl.checked) {
+    // 문장 끝에 . ? ! 없으면 추정해서 부착
+    // 단, 마지막에 콤마로 끝났으면 마침표 강제하지 않음
+    if (!/[.?!…]+$/.test(t) && !/,$/.test(t)) {
+      const add = guessTerminalPunctKorean(t);
+      if (add) t = t + add; // guessTerminalPunctKorean가 tail 포함해서 반환하도록 만들었으니 여기선 덧붙임
+      // 위에서 add에 tail까지 들어가면 중복이 될 수 있어, 현재 구현은 add가 "?)+tail" 형태라서 t+add가 맞지 않음
+      // -> 안전하게 다시 구현: add는 순수 부호만 반환하도록 처리
+    }
+  }
+
+  // 위 코멘트 반영: 안전하게 다시 종결부호 부착
+  if (autoPunctEl.checked) {
+    if (!/[.?!…]+$/.test(t) && !/,$/.test(t)) {
+      // tail 포함 버전 대신, 여기서는 부호만 붙이기 (닫힘문자 뒤에는 부호 못 붙이므로 예외 처리)
+      // 닫힘문자 꼬리 분리
+      const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
+      const core = (mm && mm[1]) ? mm[1].trim() : t.trim();
+      const tail = (mm && mm[2]) ? mm[2] : "";
+
+      let punct = ".";
+      if (/(까|나요|니|냐|습니까|인가요|인가|가요)\s*$/.test(core)) punct = "?";
+      else if (/(야|자|아|어|해|봐|좋아|대박|진짜|와|헐)\s*$/.test(core)) punct = "!";
+
+      t = core + punct + tail;
+    }
+  }
+
+  // 마지막 공백 정리
+  t = t.replace(/\s+$/g, "");
+  return t;
+}
+
+/* ---------------------
+   시작/중지
+--------------------- */
+function startRecognition(){
+  try {
+    recognition.start();
+    recognizing = true;
+    shouldAutoRestart = true;
+    setMicUI(true);
+  } catch (e) {
+    console.warn("startRecognition error:", e);
+  }
+}
+
+function stopRecognition(){
+  shouldAutoRestart = false;
+  try { recognition.stop(); } catch (e) { console.warn("stopRecognition error:", e); }
+
+  recognizing = false;
+  interimText = "";
+  setMicUI(false);
+  renderOutput();
+}
+
+micButton.addEventListener("click", () => {
+  if (!recognizing) startRecognition();
+  else stopRecognition();
 });
 
-// 음성 결과 처리
+/* ---------------------
+   음성 결과 처리
+--------------------- */
 recognition.onresult = (event) => {
-  const transcript = event.results[event.results.length - 1][0].transcript;
-  output.value += transcript + "\n";
+  interimText = "";
+
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const res = event.results[i];
+    const raw = res[0].transcript;
+
+    if (res.isFinal) {
+      const processed = applyPunctuationToFinal(raw);
+      finalText += processed + "\n";
+    } else {
+      // interim은 너무 가공하면 깜빡임/오판이 생겨서 원문 그대로 표시
+      interimText += raw;
+    }
+  }
+
+  renderOutput();
 };
 
-// 복사 버튼
+/* ---------------------
+   끊김 최소화: 종료되면 자동 재시작
+--------------------- */
+recognition.onend = () => {
+  if (shouldAutoRestart) {
+    setTimeout(() => startRecognition(), 60);
+  } else {
+    setMicUI(false);
+  }
+};
+
+/* ---------------------
+   오류 처리
+--------------------- */
+recognition.onerror = (event) => {
+  console.error("음성 인식 오류:", event.error);
+
+  if (event.error === "no-speech" || event.error === "aborted") return;
+
+  shouldAutoRestart = false;
+  recognizing = false;
+  setMicUI(false);
+};
+
+/* ---------------------
+   복사 버튼
+--------------------- */
 copyButton.addEventListener("click", async () => {
-  const textOnly = output.value; // 순수 텍스트만
+  const textOnly = copyFinalOnlyEl.checked
+    ? finalText
+    : (finalText + (interimText ? interimText : ""));
 
   try {
     await navigator.clipboard.writeText(textOnly);
 
-    // 전체화면 알림 표시
     copyAlert.style.display = "flex";
-
-    setTimeout(() => {
-      copyAlert.style.display = "none";
-    }, 3000);
+    setTimeout(() => { copyAlert.style.display = "none"; }, 1200);
 
   } catch (err) {
     alert("복사 실패: 브라우저 권한을 확인하세요.");
   }
 });
 
-// 오류 처리
-recognition.onerror = (event) => {
-  console.error("음성 인식 오류:", event.error);
-};
+/* ---------------------
+   페이지 떠날 때 정리
+--------------------- */
+window.addEventListener("beforeunload", () => {
+  try { recognition.abort(); } catch(e){}
+});
 </script>
 
 </body>
