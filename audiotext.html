@@ -23,6 +23,7 @@
     height: 100px;
     border-radius: 50%;
     border: none;
+    font-size: 40%;
     font-size: 40px;
     color: white;
     cursor: pointer;
@@ -40,8 +41,16 @@
     white-space: pre-line;
   }
 
-  #copyButton {
+  #buttonsRow {
     margin-top: 20px;
+    display: inline-flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  #copyButton, #clearButton {
     padding: 10px 20px;
     font-size: 16px;
     cursor: pointer;
@@ -92,7 +101,11 @@
 </div>
 
 <br>
-<button id="copyButton">복사하기</button>
+
+<div id="buttonsRow">
+  <button id="copyButton">복사하기</button>
+  <button id="clearButton">내용 지우기</button>
+</div>
 
 <div id="optionsBar">
   <label>
@@ -119,6 +132,7 @@
 <script>
 const micButton = document.getElementById("micButton");
 const copyButton = document.getElementById("copyButton");
+const clearButton = document.getElementById("clearButton");
 const output = document.getElementById("output");
 const copyAlert = document.getElementById("copyAlert");
 const recordHintEl = document.getElementById("recordHint");
@@ -135,14 +149,19 @@ let finalText = "";
 let interimText = "";
 
 // ✅ “침묵 최대 2초” 규칙
-const MAX_SILENCE_MS = 2000;  // 사용자가 이어 말할 수 있도록 최대 대기
-// ✅ 문장 어미 감지되면 빠르게 끊기 (짧은 확정 대기)
+const MAX_SILENCE_MS = 2000;
+// ✅ 문장 어미 감지되면 빠르게 끊기
 const ENDING_COMMIT_DELAY_MS = 350;
 
 // ✅ 내부 타이머들
 let lastUpdateAt = 0;
 let silenceTimer = null;
 let pendingCommitTimer = null;
+
+// ✅ 중복 방지 (최근 final/commit 재전송 대비)
+const RECENT_FINAL_TTL_MS = 5000; // 5초 내 동일 문장은 중복으로 보지 않음
+const recentFinalMap = new Map(); // key -> timestamp
+let lastCommittedLineKey = "";    // 바로 직전에 commit한 문장(키)
 
 // Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -217,46 +236,72 @@ function applyPunctuationToFinal(text){
 }
 
 /* ---------------------
+   ✅ 중복 방지 유틸
+--------------------- */
+function makeDedupeKey(s){
+  let t = String(s ?? "");
+  t = t.replace(/\s+/g, " ").trim();
+  t = t.replace(/[“”"']/g, "");
+  t = t.replace(/\s*([,?.!…])\s*/g, "$1");
+  return t;
+}
+
+function cleanupRecentFinals(){
+  const now = Date.now();
+  for (const [k, ts] of recentFinalMap.entries()){
+    if (now - ts > RECENT_FINAL_TTL_MS) recentFinalMap.delete(k);
+  }
+}
+
+function isDuplicateFinal(line){
+  cleanupRecentFinals();
+  const key = makeDedupeKey(line);
+
+  if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
+  if (recentFinalMap.has(key)) return true;
+
+  if (key) recentFinalMap.set(key, Date.now());
+  return false;
+}
+
+/* ---------------------
    ✅ 문장 끝 어미 감지
-   - 너무 공격적이면 자꾸 끊길 수 있어서 “대표 어미” 위주로 보수적으로 잡음
 --------------------- */
 function seemsSentenceEnding(s){
   const t = normalizeSpaces(s);
   if (!t) return false;
 
-  // 이미 종결기호 있으면 끝난 걸로
   if (/[.?!…]+$/.test(t)) return true;
 
-  // 닫힘문자 제거 후 판정
   const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
   const core = (mm && mm[1]) ? mm[1].trim() : t.trim();
 
-  // 질문형/서술형/청유/명령/감탄의 대표 어미들
-  // - “요/다/까/죠/네요/습니다/해요/했어요/인가요/될까요” 등
   return /(입니다|됩니다|합니다|했습니다|하세요|해요|했어요|됐어요|되나요|되죠|되네요|인가요|일까요|될까요|까요|나요|죠|지요|네요|군요|어요|아요|예요|이에요|다)\s*$/.test(core);
 }
 
 /* ---------------------
-   ✅ 강제 확정(줄바꿈) 공통 함수
+   ✅ 강제 확정(줄바꿈)
 --------------------- */
 function commitInterim(reason){
   if (!interimText) return;
 
-  // pendingCommitTimer가 있으면 중복 방지
   if (pendingCommitTimer) {
     clearTimeout(pendingCommitTimer);
     pendingCommitTimer = null;
   }
 
   const processed = applyPunctuationToFinal(interimText);
+
+  lastCommittedLineKey = makeDedupeKey(processed);
+  recentFinalMap.set(lastCommittedLineKey, Date.now());
+
   finalText += processed + "\n";
   interimText = "";
   renderOutput();
 }
 
 /* ---------------------
-   ✅ 타이머: 1) 최대 2초 침묵이면 확정
-             2) 어미 감지되면 짧게(350ms) 후 확정
+   ✅ 타이머
 --------------------- */
 function startWatchers(){
   stopWatchers();
@@ -267,18 +312,14 @@ function startWatchers(){
 
     const idle = Date.now() - lastUpdateAt;
 
-    // (A) 최대 2초 침묵이면 확정
     if (idle >= MAX_SILENCE_MS && interimText) {
       commitInterim("max-silence");
       return;
     }
 
-    // (B) 어미 감지: 아직 말이 이어질 수 있으니 “짧게” 대기 후 확정 예약
     if (interimText && seemsSentenceEnding(interimText)) {
-      // 이미 예약되어 있으면 유지 (중복 예약 방지)
       if (!pendingCommitTimer) {
         pendingCommitTimer = setTimeout(() => {
-          // 예약 후에도 텍스트가 그대로(또는 여전히 어미로 끝)면 확정
           if (interimText && seemsSentenceEnding(interimText)) {
             commitInterim("ending");
           }
@@ -286,7 +327,6 @@ function startWatchers(){
         }, ENDING_COMMIT_DELAY_MS);
       }
     } else {
-      // 어미 상태가 아니면 예약 취소
       if (pendingCommitTimer) {
         clearTimeout(pendingCommitTimer);
         pendingCommitTimer = null;
@@ -343,9 +383,11 @@ recognition.onresult = (event) => {
     const raw = res[0].transcript;
 
     if (res.isFinal) {
-      // 엔진이 확정해준 건 그대로 누적
       const processed = applyPunctuationToFinal(raw);
-      finalText += processed + "\n";
+
+      if (!isDuplicateFinal(processed)) {
+        finalText += processed + "\n";
+      }
     } else {
       interimText += raw;
     }
@@ -394,6 +436,28 @@ copyButton.addEventListener("click", async () => {
   } catch (err) {
     alert("복사 실패: 브라우저 권한을 확인하세요.");
   }
+});
+
+/* ---------------------
+   ✅ 내용 지우기
+--------------------- */
+clearButton.addEventListener("click", () => {
+  // 인식 중이면 안전하게 interim 확정 후 지우기(원치 않으면 commitInterim 라인 삭제)
+  if (interimText) {
+    // commitInterim("clear");  // ← 지우기 전에 임시 내용을 확정하고 싶으면 주석 해제
+    interimText = "";
+  }
+
+  finalText = "";
+  output.value = "";
+  output.scrollTop = 0;
+
+  // ✅ 중복방지 버퍼도 같이 리셋 (안 그러면 “지운 뒤” 동일 문장이 스킵될 수 있음)
+  recentFinalMap.clear();
+  lastCommittedLineKey = "";
+
+  // 타이머 기준도 리셋
+  lastUpdateAt = Date.now();
 });
 
 /* ---------------------
