@@ -5,87 +5,42 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>음성 받아쓰기</title>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    text-align: center;
-    margin-top: 80px;
-  }
+  body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; }
 
-  #micRow{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 18px;
-  }
+  #micRow{ display: inline-flex; align-items: center; justify-content: center; gap: 18px; }
 
   #micButton {
-    width: 100px;
-    height: 100px;
-    border-radius: 50%;
-    border: none;
-    font-size: 40px;
-    color: white;
-    cursor: pointer;
-    background-color: green;
-    flex: 0 0 auto;
+    width: 100px; height: 100px; border-radius: 50%;
+    border: none; font-size: 40px; color: white; cursor: pointer;
+    background-color: green; flex: 0 0 auto;
   }
 
   #recordHint {
-    display: none;
-    color: red;
-    font-size: 250%;
-    font-weight: 800;
-    line-height: 1.2;
-    text-align: left;
-    white-space: pre-line;
+    display: none; color: red; font-size: 250%; font-weight: 800;
+    line-height: 1.2; text-align: left; white-space: pre-line;
   }
 
   #buttonsRow {
     margin-top: 20px;
-    display: inline-flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
+    display: inline-flex; gap: 12px;
+    align-items: center; justify-content: center; flex-wrap: wrap;
   }
 
-  #copyButton, #clearButton {
-    padding: 10px 20px;
-    font-size: 16px;
-    cursor: pointer;
-  }
+  #copyButton, #clearButton { padding: 10px 20px; font-size: 16px; cursor: pointer; }
 
-  #output {
-    margin-top: 30px;
-    width: 80%;
-    height: 200px;
-    font-size: 18px;
-  }
+  #output { margin-top: 30px; width: 80%; height: 200px; font-size: 18px; }
 
   #copyAlert {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.8);
-    color: white;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    font-size: 40px;
-    z-index: 9999;
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(0,0,0,0.8); color: white; display: none;
+    justify-content: center; align-items: center; font-size: 40px; z-index: 9999;
   }
 
   #optionsBar {
     margin-top: 16px;
-    display: inline-flex;
-    gap: 14px;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    color: #444;
-    font-size: 14px;
+    display: inline-flex; gap: 14px;
+    align-items: center; justify-content: center; flex-wrap: wrap;
+    color: #444; font-size: 14px;
   }
 
   label { user-select: none; }
@@ -147,8 +102,9 @@ let shouldAutoRestart = false;
 let finalText = "";
 let interimText = "";
 
-// ✅ “침묵 최대 2초” 규칙
-const MAX_SILENCE_MS = 2000;
+// ✅ “침묵 최대 1초” 규칙 (요청 반영)
+const MAX_SILENCE_MS = 1000;
+
 // ✅ 문장 어미 감지되면 빠르게 끊기
 const ENDING_COMMIT_DELAY_MS = 350;
 
@@ -158,7 +114,7 @@ let silenceTimer = null;
 let pendingCommitTimer = null;
 
 // ✅ 중복 방지 (최근 final/commit 재전송 대비)
-const RECENT_FINAL_TTL_MS = 5000; // 5초 내 동일 문장은 중복으로 보지 않음
+const RECENT_FINAL_TTL_MS = 8000; // 반복이 잦으면 8초 정도가 안정적
 const recentFinalMap = new Map(); // key -> timestamp
 let lastCommittedLineKey = "";    // 바로 직전에 commit한 문장(키)
 
@@ -230,18 +186,28 @@ function applyPunctuationToFinal(text){
     }
   }
 
-  t = t.replace(/\s+$/g, "");
-  return t;
+  return t.replace(/\s+$/g, "");
 }
 
 /* ---------------------
-   ✅ 중복 방지 유틸
+   ✅ 중복 방지 유틸 (더 강하게 정규화)
 --------------------- */
 function makeDedupeKey(s){
   let t = String(s ?? "");
+
+  // 공백 정리
   t = t.replace(/\s+/g, " ").trim();
+
+  // 따옴표/유사문자 제거
   t = t.replace(/[“”"']/g, "");
+
+  // 구두점 주변 공백 통일
   t = t.replace(/\s*([,?.!…])\s*/g, "$1");
+
+  // ✅ 종결 구두점(.,?,!,…)이 붙었다/안붙었다 차이로 중복 판정이 흔들리는 걸 방지
+  //    (문장 끝의 연속 종결부호는 하나로 취급)
+  t = t.replace(/[.?!…]+$/g, ".");
+
   return t;
 }
 
@@ -256,7 +222,7 @@ function isDuplicateFinal(line){
   cleanupRecentFinals();
   const key = makeDedupeKey(line);
 
-  // 1) 방금 commit한 줄과 동일하면 스킵 (강제확정 후 엔진 final 재전송)
+  // 1) 방금 commit한 줄과 동일하면 스킵
   if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
 
   // 2) 최근 TTL 내 동일 final 스킵
@@ -273,7 +239,6 @@ function seemsSentenceEnding(s){
   const t = normalizeSpaces(s);
   if (!t) return false;
 
-  // 이미 종결기호 있으면 끝난 걸로
   if (/[.?!…]+$/.test(t)) return true;
 
   const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
@@ -295,7 +260,7 @@ function commitInterim(reason){
 
   const processed = applyPunctuationToFinal(interimText);
 
-  // commit한 문장을 "방금 커밋"으로 기록
+  // ✅ commit도 중복 키로 등록해서, 바로 뒤에 엔진이 동일 final 재전송해도 막힘
   lastCommittedLineKey = makeDedupeKey(processed);
   recentFinalMap.set(lastCommittedLineKey, Date.now());
 
@@ -305,8 +270,8 @@ function commitInterim(reason){
 }
 
 /* ---------------------
-   ✅ 타이머: 1) 최대 2초 침묵이면 확정
-             2) 어미 감지되면 짧게(350ms) 후 확정
+   ✅ 타이머: 1) 최대 1초 침묵이면 확정
+             2) 어미 감지되면 350ms 후 확정
 --------------------- */
 function startWatchers(){
   stopWatchers();
@@ -317,7 +282,7 @@ function startWatchers(){
 
     const idle = Date.now() - lastUpdateAt;
 
-    // (A) 최대 2초 침묵이면 확정
+    // (A) ✅ 최대 1초 침묵이면 확정
     if (idle >= MAX_SILENCE_MS && interimText) {
       commitInterim("max-silence");
       return;
@@ -379,12 +344,12 @@ micButton.addEventListener("click", () => {
 });
 
 /* ---------------------
-   ✅ 음성 결과 (중요: interim은 누적(+=) 금지, 마지막 값으로 교체)
+   ✅ 음성 결과
+   - interim은 누적(+=) 금지: "마지막 값"으로 교체
 --------------------- */
 recognition.onresult = (event) => {
   lastUpdateAt = Date.now();
 
-  // ✅ interim은 "최신 1개"만 유지 (엔진이 전체 interim을 반복 전송해도 누적되지 않음)
   let newInterim = "";
 
   for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -394,24 +359,23 @@ recognition.onresult = (event) => {
     if (res.isFinal) {
       const processed = applyPunctuationToFinal(raw);
 
-      // ✅ final 중복이면 누적하지 않음
       if (!isDuplicateFinal(processed)) {
         finalText += processed + "\n";
       }
 
-      // final이 들어오면 interim 겹침 방지
+      // final이 오면 interim 겹침 방지
       newInterim = "";
     } else {
-      // ✅ 마지막 interim만 채택 (누적 금지)
+      // ✅ 최신 interim만
       newInterim = raw;
     }
   }
 
-  // ✅ 같은 interim이면 렌더 불필요 (깜빡임/중복 표시 방지)
   const prev = interimText;
   interimText = newInterim;
 
-  if (finalText || interimText !== prev) {
+  // 동일 interim 반복 렌더 방지
+  if (interimText !== prev || finalText) {
     renderOutput();
   }
 };
@@ -462,13 +426,11 @@ copyButton.addEventListener("click", async () => {
    ✅ 내용 지우기
 --------------------- */
 clearButton.addEventListener("click", () => {
-  // 인식 중이면 interim만 지움 (원하면 stopRecognition()으로 완전 종료도 가능)
   interimText = "";
   finalText = "";
   output.value = "";
   output.scrollTop = 0;
 
-  // ✅ 중복방지 버퍼도 리셋 (지운 뒤 동일 문장이 스킵되는 문제 방지)
   recentFinalMap.clear();
   lastCommittedLineKey = "";
 
