@@ -120,7 +120,7 @@ let audioGateReady = false;
 
 // 목소리로 판단할 최소 RMS (환경마다 다름)
 // 너무 민감하면 올리고(0.03~0.05), 너무 둔하면 내리고(0.01~0.02)
-const VOICE_RMS_THRESHOLD = 0.02;
+const VOICE_RMS_THRESHOLD = 0.01;
 
 // final 채택: 마지막으로 목소리 감지된 지 N ms 이내여야 함
 const ACCEPT_WITHIN_MS = 1200;
