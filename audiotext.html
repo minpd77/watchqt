@@ -123,17 +123,52 @@ function setMicUI(on){
   micButton.style.backgroundColor = on ? "red" : "green";
   recordHintEl.style.display = on ? "block" : "none";
 }
-
 function renderOutput(){
   output.value = finalText + (interimText ? interimText : "");
   output.scrollTop = output.scrollHeight;
 }
 
-/* 구두점 */
+/* 텍스트 유틸 */
 function normalizeSpaces(s){
   return String(s ?? "").replace(/\s+/g, " ").trim();
 }
 
+/* ✅ UI/옵션 단어가 섞인 “헛문장” 필터 */
+const noisyTokens = [
+  // 안내문/상태
+  "인식", "받아쓰기", "마이크", "종료", "됩니다", "누르면",
+  // 버튼/옵션 텍스트
+  "복사", "확정", "자동", "구두점", "말한", "변환",
+  // 흔한 오염 토큰
+  "두 점", "콜론", "쉼표", "마침표", "물음표", "느낌표"
+];
+
+// 필요하면 여기에 더 추가 가능 (예: "음식 중" 같은 특정 오인식)
+const blockedPhrases = [
+  "인식 중 음성 받아쓰기 중 마이크를 누르면 종료 됩니다",
+  "음성 받아쓰기 중 마이크를 누르면 종료 됩니다"
+];
+
+function looksLikeUIJunk(text){
+  const t = normalizeSpaces(text);
+  if (!t) return true;
+
+  // 1) 완전 일치/포함 기반 차단
+  for (const p of blockedPhrases){
+    if (t.includes(p)) return true;
+  }
+
+  // 2) UI 토큰이 여러 개 섞이면(예: "복사 확정 자동") 버림
+  let hit = 0;
+  for (const tok of noisyTokens){
+    if (t.includes(tok)) hit++;
+    if (hit >= 2) return true; // ✅ 2개 이상이면 UI 오염으로 판단
+  }
+
+  return false;
+}
+
+/* 구두점 */
 function convertSpokenPunctuation(s){
   return s
     .replace(/\b쉼표\b/g, ",")
@@ -168,7 +203,6 @@ function applyPunctuationToFinal(text){
       t = core + punct + tail;
     }
   }
-
   return t.replace(/\s+$/g, "");
 }
 
@@ -178,24 +212,20 @@ function makeDedupeKey(s){
   t = t.replace(/\s+/g, " ").trim();
   t = t.replace(/[“”"']/g, "");
   t = t.replace(/\s*([,?.!…])\s*/g, "$1");
-  t = t.replace(/[.?!…]+$/g, "."); // 끝 구두점 차이 무시
+  t = t.replace(/[.?!…]+$/g, ".");
   return t;
 }
-
 function cleanupRecentFinals(){
   const now = Date.now();
   for (const [k, ts] of recentFinalMap.entries()){
     if (now - ts > RECENT_FINAL_TTL_MS) recentFinalMap.delete(k);
   }
 }
-
 function isDuplicateFinal(line){
   cleanupRecentFinals();
   const key = makeDedupeKey(line);
-
   if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
   if (recentFinalMap.has(key)) return true;
-
   if (key) recentFinalMap.set(key, Date.now());
   return false;
 }
@@ -223,7 +253,13 @@ function commitInterim(reason){
 
   const processed = applyPunctuationToFinal(interimText);
 
-  // commit도 중복키 등록 -> 바로 뒤 동일 final 재전송 방지
+  // ✅ UI 오염 문장 버림
+  if (looksLikeUIJunk(processed)) {
+    interimText = "";
+    renderOutput();
+    return;
+  }
+
   lastCommittedLineKey = makeDedupeKey(processed);
   recentFinalMap.set(lastCommittedLineKey, Date.now());
 
@@ -242,13 +278,11 @@ function startWatchers(){
 
     const idle = Date.now() - lastUpdateAt;
 
-    // ✅ 1초 침묵이면 확정
     if (idle >= MAX_SILENCE_MS && interimText) {
       commitInterim("max-silence");
       return;
     }
 
-    // 어미 감지면 짧게 대기 후 확정 예약
     if (interimText && seemsSentenceEnding(interimText)) {
       if (!pendingCommitTimer) {
         pendingCommitTimer = setTimeout(() => {
@@ -266,7 +300,6 @@ function startWatchers(){
     }
   }, 120);
 }
-
 function stopWatchers(){
   if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
   if (pendingCommitTimer) { clearTimeout(pendingCommitTimer); pendingCommitTimer = null; }
@@ -284,7 +317,6 @@ function startRecognition(){
     console.warn("startRecognition error:", e);
   }
 }
-
 function stopRecognition(){
   shouldAutoRestart = false;
   try { recognition.stop(); } catch (e) { console.warn("stopRecognition error:", e); }
@@ -295,13 +327,12 @@ function stopRecognition(){
   stopWatchers();
   renderOutput();
 }
-
 micButton.addEventListener("click", () => {
   if (!recognizing) startRecognition();
   else stopRecognition();
 });
 
-/* ✅ 결과 처리: interim 누적 금지(마지막 값으로 교체) */
+/* ✅ 결과 처리: interim 누적 금지 + UI오염 필터 + final 중복 방지 */
 recognition.onresult = (event) => {
   lastUpdateAt = Date.now();
 
@@ -314,34 +345,34 @@ recognition.onresult = (event) => {
     if (res.isFinal) {
       const processed = applyPunctuationToFinal(raw);
 
+      // ✅ UI 오염이면 버림
+      if (looksLikeUIJunk(processed)) continue;
+
       if (!isDuplicateFinal(processed)) {
         finalText += processed + "\n";
       }
-
       newInterim = "";
     } else {
-      newInterim = raw; // ✅ 마지막 interim만
+      // interim도 UI오염이면 표시하지 않음
+      if (!looksLikeUIJunk(raw)) newInterim = raw;
     }
   }
 
   const prev = interimText;
   interimText = newInterim;
-
   if (interimText !== prev) renderOutput();
 };
 
 /* 자동 재시작 */
 recognition.onend = () => {
   if (shouldAutoRestart) {
-    setTimeout(() => {
-      try { recognition.start(); } catch(e){}
-    }, 80);
+    setTimeout(() => { try { recognition.start(); } catch(e){} }, 80);
   } else {
     setMicUI(false);
   }
 };
 
-/* 오류 처리 */
+/* 오류 */
 recognition.onerror = (event) => {
   console.error("음성 인식 오류:", event.error);
   if (event.error === "no-speech" || event.error === "aborted") return;
@@ -354,10 +385,7 @@ recognition.onerror = (event) => {
 
 /* 복사 */
 copyButton.addEventListener("click", async () => {
-  const textOnly = copyFinalOnlyEl.checked
-    ? finalText
-    : (finalText + (interimText ? interimText : ""));
-
+  const textOnly = copyFinalOnlyEl.checked ? finalText : (finalText + (interimText ? interimText : ""));
   try {
     await navigator.clipboard.writeText(textOnly);
     copyAlert.style.display = "flex";
@@ -376,7 +404,6 @@ clearButton.addEventListener("click", () => {
 
   recentFinalMap.clear();
   lastCommittedLineKey = "";
-
   lastUpdateAt = Date.now();
 });
 
