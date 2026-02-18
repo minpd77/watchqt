@@ -6,43 +6,34 @@
 <title>음성 받아쓰기</title>
 <style>
   body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; }
-
   #micRow{ display: inline-flex; align-items: center; justify-content: center; gap: 18px; }
-
   #micButton {
     width: 100px; height: 100px; border-radius: 50%;
     border: none; font-size: 40px; color: white; cursor: pointer;
     background-color: green; flex: 0 0 auto;
   }
-
   #recordHint {
     display: none; color: red; font-size: 250%; font-weight: 800;
     line-height: 1.2; text-align: left; white-space: pre-line;
   }
-
   #buttonsRow {
     margin-top: 20px;
     display: inline-flex; gap: 12px;
     align-items: center; justify-content: center; flex-wrap: wrap;
   }
-
   #copyButton, #clearButton { padding: 10px 20px; font-size: 16px; cursor: pointer; }
-
   #output { margin-top: 30px; width: 80%; height: 200px; font-size: 18px; }
-
   #copyAlert {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background-color: rgba(0,0,0,0.8); color: white; display: none;
     justify-content: center; align-items: center; font-size: 40px; z-index: 9999;
   }
-
   #optionsBar {
     margin-top: 16px;
     display: inline-flex; gap: 14px;
     align-items: center; justify-content: center; flex-wrap: wrap;
     color: #444; font-size: 14px;
   }
-
   label { user-select: none; }
 </style>
 </head>
@@ -102,34 +93,89 @@ let shouldAutoRestart = false;
 let finalText = "";
 let interimText = "";
 
-// ✅ “침묵 최대 1초” 규칙 (요청 반영)
+// ✅ 침묵 1초면 문장 확정 (요청)
 const MAX_SILENCE_MS = 1000;
-
-// ✅ 문장 어미 감지되면 빠르게 끊기
 const ENDING_COMMIT_DELAY_MS = 350;
 
-// ✅ 내부 타이머들
+// 타이머
 let lastUpdateAt = 0;
 let silenceTimer = null;
 let pendingCommitTimer = null;
 
-// ✅ 중복 방지 (최근 final/commit 재전송 대비)
-const RECENT_FINAL_TTL_MS = 8000; // 반복이 잦으면 8초 정도가 안정적
-const recentFinalMap = new Map(); // key -> timestamp
-let lastCommittedLineKey = "";    // 바로 직전에 commit한 문장(키)
+// 중복 방지
+const RECENT_FINAL_TTL_MS = 8000;
+const recentFinalMap = new Map();
+let lastCommittedLineKey = "";
 
-// Web Speech API
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+/* ---------------------
+   ✅ “실제 목소리” 게이트 (핵심)
+   - 침묵/잡음/피드백으로 생기는 헛문장을 막음
+--------------------- */
+let audioCtx = null;
+let analyser = null;
+let micStream = null;
+let rmsTimer = null;
+let lastVoiceAt = 0;
+let audioGateReady = false;
 
-if (!SpeechRecognition) {
-  alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
+// 목소리로 판단할 최소 RMS (환경마다 다름)
+// 너무 민감하면 올리고(0.03~0.05), 너무 둔하면 내리고(0.01~0.02)
+const VOICE_RMS_THRESHOLD = 0.02;
+
+// final 채택: 마지막으로 목소리 감지된 지 N ms 이내여야 함
+const ACCEPT_WITHIN_MS = 1200;
+
+async function startAudioGate(){
+  try{
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+
+    const buf = new Float32Array(analyser.fftSize);
+
+    rmsTimer = setInterval(() => {
+      if (!analyser) return;
+      analyser.getFloatTimeDomainData(buf);
+
+      let sum = 0;
+      for (let i=0; i<buf.length; i++){
+        const v = buf[i];
+        sum += v*v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+
+      if (rms >= VOICE_RMS_THRESHOLD) {
+        lastVoiceAt = Date.now();
+      }
+    }, 60);
+
+    audioGateReady = true;
+  }catch(e){
+    // 권한 거부/브라우저 제한 시: 게이트 없이 동작 (필터로만 방어)
+    audioGateReady = false;
+    console.warn("Audio gate disabled:", e);
+  }
 }
 
-const recognition = new SpeechRecognition();
-recognition.lang = "ko-KR";
-recognition.continuous = true;
-recognition.interimResults = true;
-recognition.maxAlternatives = 1;
+function stopAudioGate(){
+  audioGateReady = false;
+  if (rmsTimer) { clearInterval(rmsTimer); rmsTimer = null; }
+  if (audioCtx) { try { audioCtx.close(); } catch(e){} audioCtx = null; }
+  analyser = null;
+  if (micStream) {
+    try { micStream.getTracks().forEach(t => t.stop()); } catch(e){}
+    micStream = null;
+  }
+  lastVoiceAt = 0;
+}
+
+function hasRecentVoice(){
+  if (!audioGateReady) return true; // 게이트가 없으면 통과(필터로만 방어)
+  return (Date.now() - lastVoiceAt) <= ACCEPT_WITHIN_MS;
+}
 
 /* ---------------------
    UI
@@ -190,24 +236,33 @@ function applyPunctuationToFinal(text){
 }
 
 /* ---------------------
-   ✅ 중복 방지 유틸 (더 강하게 정규화)
+   ✅ “헛문장” 필터 (UI 문구/반복문구 차단)
+   - 필요 없으면 blacklistWords 배열만 비워도 됨
+--------------------- */
+const blacklistWords = [
+  "인식중",
+  "인식 중",
+  "음성 받아쓰기",
+  "마이크를 누르면 종료",
+  "마이크로 누르면 종료",
+  "종료 됩니다"
+];
+
+function isBlacklisted(s){
+  const t = normalizeSpaces(s);
+  if (!t) return true; // 빈 문장은 버림
+  return blacklistWords.some(w => t.includes(w));
+}
+
+/* ---------------------
+   중복 방지
 --------------------- */
 function makeDedupeKey(s){
   let t = String(s ?? "");
-
-  // 공백 정리
   t = t.replace(/\s+/g, " ").trim();
-
-  // 따옴표/유사문자 제거
   t = t.replace(/[“”"']/g, "");
-
-  // 구두점 주변 공백 통일
   t = t.replace(/\s*([,?.!…])\s*/g, "$1");
-
-  // ✅ 종결 구두점(.,?,!,…)이 붙었다/안붙었다 차이로 중복 판정이 흔들리는 걸 방지
-  //    (문장 끝의 연속 종결부호는 하나로 취급)
   t = t.replace(/[.?!…]+$/g, ".");
-
   return t;
 }
 
@@ -222,10 +277,7 @@ function isDuplicateFinal(line){
   cleanupRecentFinals();
   const key = makeDedupeKey(line);
 
-  // 1) 방금 commit한 줄과 동일하면 스킵
   if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
-
-  // 2) 최근 TTL 내 동일 final 스킵
   if (recentFinalMap.has(key)) return true;
 
   if (key) recentFinalMap.set(key, Date.now());
@@ -233,12 +285,11 @@ function isDuplicateFinal(line){
 }
 
 /* ---------------------
-   ✅ 문장 끝 어미 감지
+   문장 끝 어미 감지
 --------------------- */
 function seemsSentenceEnding(s){
   const t = normalizeSpaces(s);
   if (!t) return false;
-
   if (/[.?!…]+$/.test(t)) return true;
 
   const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
@@ -248,7 +299,7 @@ function seemsSentenceEnding(s){
 }
 
 /* ---------------------
-   ✅ 강제 확정(줄바꿈)
+   강제 확정
 --------------------- */
 function commitInterim(reason){
   if (!interimText) return;
@@ -258,9 +309,22 @@ function commitInterim(reason){
     pendingCommitTimer = null;
   }
 
+  // ✅ 침묵/잡음 구간이면 확정 자체를 하지 않음 (헛문장 방지)
+  if (!hasRecentVoice()) {
+    interimText = "";
+    renderOutput();
+    return;
+  }
+
   const processed = applyPunctuationToFinal(interimText);
 
-  // ✅ commit도 중복 키로 등록해서, 바로 뒤에 엔진이 동일 final 재전송해도 막힘
+  // ✅ blacklist면 버림
+  if (isBlacklisted(processed)) {
+    interimText = "";
+    renderOutput();
+    return;
+  }
+
   lastCommittedLineKey = makeDedupeKey(processed);
   recentFinalMap.set(lastCommittedLineKey, Date.now());
 
@@ -270,8 +334,7 @@ function commitInterim(reason){
 }
 
 /* ---------------------
-   ✅ 타이머: 1) 최대 1초 침묵이면 확정
-             2) 어미 감지되면 350ms 후 확정
+   타이머 (침묵 1초 확정)
 --------------------- */
 function startWatchers(){
   stopWatchers();
@@ -282,13 +345,12 @@ function startWatchers(){
 
     const idle = Date.now() - lastUpdateAt;
 
-    // (A) ✅ 최대 1초 침묵이면 확정
+    // ✅ 1초 침묵이면 확정
     if (idle >= MAX_SILENCE_MS && interimText) {
       commitInterim("max-silence");
       return;
     }
 
-    // (B) 어미 감지면 짧게 대기 후 확정 예약
     if (interimText && seemsSentenceEnding(interimText)) {
       if (!pendingCommitTimer) {
         pendingCommitTimer = setTimeout(() => {
@@ -313,10 +375,28 @@ function stopWatchers(){
 }
 
 /* ---------------------
+   Web Speech API
+--------------------- */
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SpeechRecognition) {
+  alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
+}
+
+const recognition = new SpeechRecognition();
+recognition.lang = "ko-KR";
+recognition.continuous = true;
+recognition.interimResults = true;
+recognition.maxAlternatives = 1;
+
+/* ---------------------
    시작/중지
 --------------------- */
-function startRecognition(){
+async function startRecognition(){
   try {
+    // ✅ 오디오 게이트 시작(권한 요청)
+    await startAudioGate();
+
     recognition.start();
     recognizing = true;
     shouldAutoRestart = true;
@@ -335,6 +415,7 @@ function stopRecognition(){
   interimText = "";
   setMicUI(false);
   stopWatchers();
+  stopAudioGate();
   renderOutput();
 }
 
@@ -344,8 +425,10 @@ micButton.addEventListener("click", () => {
 });
 
 /* ---------------------
-   ✅ 음성 결과
-   - interim은 누적(+=) 금지: "마지막 값"으로 교체
+   ✅ 결과 처리
+   - interim 누적 금지
+   - “최근 실제 목소리”가 있어야 final을 채택
+   - blacklist/중복 방지
 --------------------- */
 recognition.onresult = (event) => {
   lastUpdateAt = Date.now();
@@ -357,27 +440,35 @@ recognition.onresult = (event) => {
     const raw = res[0].transcript;
 
     if (res.isFinal) {
+      // ✅ 실제 목소리 없으면 final 버림 (침묵/잡음 헛문장 방지)
+      if (!hasRecentVoice()) continue;
+
       const processed = applyPunctuationToFinal(raw);
 
+      // ✅ UI/헛문장 필터
+      if (isBlacklisted(processed)) continue;
+
+      // ✅ final 중복 방지
       if (!isDuplicateFinal(processed)) {
         finalText += processed + "\n";
       }
 
-      // final이 오면 interim 겹침 방지
       newInterim = "";
     } else {
-      // ✅ 최신 interim만
+      // ✅ 마지막 interim만 유지
       newInterim = raw;
     }
+  }
+
+  // interim도 “헛문장”이면 표시 자체를 안 함
+  if (newInterim && (isBlacklisted(newInterim) || !hasRecentVoice())) {
+    newInterim = "";
   }
 
   const prev = interimText;
   interimText = newInterim;
 
-  // 동일 interim 반복 렌더 방지
-  if (interimText !== prev || finalText) {
-    renderOutput();
-  }
+  if (interimText !== prev) renderOutput();
 };
 
 /* ---------------------
@@ -385,7 +476,9 @@ recognition.onresult = (event) => {
 --------------------- */
 recognition.onend = () => {
   if (shouldAutoRestart) {
-    setTimeout(() => startRecognition(), 60);
+    setTimeout(() => {
+      try { recognition.start(); } catch(e){}
+    }, 80);
   } else {
     setMicUI(false);
   }
@@ -396,13 +489,13 @@ recognition.onend = () => {
 --------------------- */
 recognition.onerror = (event) => {
   console.error("음성 인식 오류:", event.error);
-
   if (event.error === "no-speech" || event.error === "aborted") return;
 
   shouldAutoRestart = false;
   recognizing = false;
   setMicUI(false);
   stopWatchers();
+  stopAudioGate();
 };
 
 /* ---------------------
@@ -423,7 +516,7 @@ copyButton.addEventListener("click", async () => {
 });
 
 /* ---------------------
-   ✅ 내용 지우기
+   내용 지우기
 --------------------- */
 clearButton.addEventListener("click", () => {
   interimText = "";
@@ -433,7 +526,6 @@ clearButton.addEventListener("click", () => {
 
   recentFinalMap.clear();
   lastCommittedLineKey = "";
-
   lastUpdateAt = Date.now();
 });
 
@@ -442,6 +534,7 @@ clearButton.addEventListener("click", () => {
 --------------------- */
 window.addEventListener("beforeunload", () => {
   try { recognition.abort(); } catch(e){}
+  stopAudioGate();
 });
 </script>
 
