@@ -5,35 +5,89 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>음성 받아쓰기</title>
 <style>
-  body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; }
-  #micRow{ display: inline-flex; align-items: center; justify-content: center; gap: 18px; }
+  body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    margin-top: 80px;
+  }
+
+  #micRow{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+  }
+
   #micButton {
-    width: 100px; height: 100px; border-radius: 50%;
-    border: none; font-size: 40px; color: white; cursor: pointer;
-    background-color: green; flex: 0 0 auto;
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    border: none;
+    font-size: 40px;
+    color: white;
+    cursor: pointer;
+    background-color: green;
+    flex: 0 0 auto;
   }
+
   #recordHint {
-    display: none; color: red; font-size: 250%; font-weight: 800;
-    line-height: 1.2; text-align: left; white-space: pre-line;
+    display: none;
+    color: red;
+    font-size: 250%;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: left;
+    white-space: pre-line;
   }
-  #buttonsRow {
+
+  #copyButton {
     margin-top: 20px;
-    display: inline-flex; gap: 12px;
-    align-items: center; justify-content: center; flex-wrap: wrap;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
   }
-  #copyButton, #clearButton { padding: 10px 20px; font-size: 16px; cursor: pointer; }
-  #output { margin-top: 30px; width: 80%; height: 220px; font-size: 18px; }
+
+  #clearButton{
+    margin-top: 20px;
+    margin-left: 10px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  #output {
+    margin-top: 30px;
+    width: 80%;
+    height: 200px;
+    font-size: 18px;
+  }
+
   #copyAlert {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background-color: rgba(0,0,0,0.8); color: white; display: none;
-    justify-content: center; align-items: center; font-size: 40px; z-index: 9999;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.8);
+    color: white;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    font-size: 40px;
+    z-index: 9999;
   }
+
   #optionsBar {
     margin-top: 16px;
-    display: inline-flex; gap: 14px;
-    align-items: center; justify-content: center; flex-wrap: wrap;
-    color: #444; font-size: 14px;
+    display: inline-flex;
+    gap: 14px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    color: #444;
+    font-size: 14px;
   }
+
   label { user-select: none; }
 </style>
 </head>
@@ -46,11 +100,8 @@
 </div>
 
 <br>
-
-<div id="buttonsRow">
-  <button id="copyButton">복사하기</button>
-  <button id="clearButton">내용 지우기</button>
-</div>
+<button id="copyButton">복사하기</button>
+<button id="clearButton">내용 지우기</button>
 
 <div id="optionsBar">
   <label>
@@ -89,57 +140,42 @@ const spokenPunctEl = document.getElementById("spokenPunct");
 let recognizing = false;
 let shouldAutoRestart = false;
 
-// ✅ 최종 줄들을 배열로 관리 (중요: “확장 final”이면 마지막 줄 교체)
-let lines = [];
-let interimText = "";
-
-// ✅ 1초 침묵이면 확정
-const MAX_SILENCE_MS = 1000;
-const ENDING_COMMIT_DELAY_MS = 350;
-
-let lastUpdateAt = 0;
-let silenceTimer = null;
-let pendingCommitTimer = null;
-
-// ✅ final 중복 방지
-const RECENT_FINAL_TTL_MS = 8000;
-const recentFinalMap = new Map();
-let lastCommittedLineKey = "";
-
-// ✅ “확장 final” 교체 판단용
-let lastFinalAt = 0;
-const EXPAND_WINDOW_MS = 4000; // 4초 안에 온 확장 final이면 교체 시도
+// ✅ 이제부터는 “final만” 쌓는다 (interim 표시/누적 없음)
+let finalText = "";
 
 // Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
 if (!SpeechRecognition) {
-  alert("이 브라우저는 음성 인식을 지원하지 않습니다.\n(참고: iOS 사파리는 Web Speech API가 제한될 수 있습니다.)");
+  alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
 }
 
 const recognition = new SpeechRecognition();
 recognition.lang = "ko-KR";
-recognition.continuous = true;
-recognition.interimResults = true;
+
+// ✅ 핵심: 확장 final/반복을 줄이기 위해 “한 번에 한 문장” 모드로
+recognition.continuous = false;
+
+// ✅ 핵심: interim 끄기 (중간 문장/확장 과정이 화면에 섞이지 않게)
+recognition.interimResults = false;
+
 recognition.maxAlternatives = 1;
 
-/* UI */
+/* ---------------------
+   UI
+--------------------- */
 function setMicUI(on){
   micButton.style.backgroundColor = on ? "red" : "green";
   recordHintEl.style.display = on ? "block" : "none";
 }
 
-function renderOutput(){
-  const finalBlock = lines.join("\n");
-  output.value = finalBlock + (interimText ? (finalBlock ? "\n" : "") + interimText : "");
-  output.scrollTop = output.scrollHeight;
-}
-
-/* 텍스트 유틸 */
+/* ---------------------
+   구두점
+--------------------- */
 function normalizeSpaces(s){
   return String(s ?? "").replace(/\s+/g, " ").trim();
 }
 
-/* 구두점 */
 function convertSpokenPunctuation(s){
   return s
     .replace(/\b쉼표\b/g, ",")
@@ -157,7 +193,7 @@ function applyPunctuationToFinal(text){
 
   if (spokenPunctEl.checked) {
     t = convertSpokenPunctuation(t);
-    t = t.replace(/\s*([,?.!…])\s*/g, "$1 ");
+    t = t.replace(/\s*([,?.!])\s*/g, "$1 ");
     t = t.replace(/\s+/g, " ").trim();
   }
 
@@ -175,151 +211,19 @@ function applyPunctuationToFinal(text){
     }
   }
 
-  return t.replace(/\s+$/g, "");
-}
-
-/* ✅ “확장 final” 비교용 키 (끝 구두점/공백 차이 무시) */
-function coreKey(s){
-  let t = normalizeSpaces(s);
-  t = t.replace(/[“”"']/g, "");
-  t = t.replace(/\s*([,?.!…])\s*/g, "$1");
-  t = t.replace(/[.?!…]+$/g, ""); // 끝 종결부호 제거
+  t = t.replace(/\s+$/g, "");
   return t;
 }
 
-/* 중복 방지 */
-function makeDedupeKey(s){
-  let t = String(s ?? "");
-  t = t.replace(/\s+/g, " ").trim();
-  t = t.replace(/[“”"']/g, "");
-  t = t.replace(/\s*([,?.!…])\s*/g, "$1");
-  t = t.replace(/[.?!…]+$/g, "."); // 끝 구두점 차이 무시
-  return t;
-}
-
-function cleanupRecentFinals(){
-  const now = Date.now();
-  for (const [k, ts] of recentFinalMap.entries()){
-    if (now - ts > RECENT_FINAL_TTL_MS) recentFinalMap.delete(k);
-  }
-}
-
-function isDuplicateFinal(line){
-  cleanupRecentFinals();
-  const key = makeDedupeKey(line);
-
-  if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
-  if (recentFinalMap.has(key)) return true;
-
-  if (key) recentFinalMap.set(key, Date.now());
-  return false;
-}
-
-/* ✅ final을 lines에 넣는 핵심 함수: "확장 final"이면 마지막 줄 교체 */
-function pushOrReplaceFinal(processed){
-  const now = Date.now();
-
-  // 중복이면 무시
-  if (isDuplicateFinal(processed)) return;
-
-  const curCore = coreKey(processed);
-
-  if (lines.length > 0 && (now - lastFinalAt) <= EXPAND_WINDOW_MS) {
-    const lastLine = lines[lines.length - 1];
-    const lastCore = coreKey(lastLine);
-
-    // ✅ 새 문장이 "이전 문장으로 시작"하면 (= 확장판) 마지막 줄을 교체
-    // 예: "안녕하세요." -> "안녕하세요 알프스." -> ...
-    if (curCore.startsWith(lastCore) && curCore.length >= lastCore.length) {
-      lines[lines.length - 1] = processed;
-      lastCommittedLineKey = makeDedupeKey(processed);
-      recentFinalMap.set(lastCommittedLineKey, Date.now());
-      lastFinalAt = now;
-      return;
-    }
-  }
-
-  // 그렇지 않으면 새 줄로 추가
-  lines.push(processed);
-  lastCommittedLineKey = makeDedupeKey(processed);
-  recentFinalMap.set(lastCommittedLineKey, Date.now());
-  lastFinalAt = now;
-}
-
-/* 문장 끝 어미 감지 */
-function seemsSentenceEnding(s){
-  const t = normalizeSpaces(s);
-  if (!t) return false;
-  if (/[.?!…]+$/.test(t)) return true;
-
-  const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
-  const core = (mm && mm[1]) ? mm[1].trim() : t.trim();
-
-  return /(입니다|됩니다|합니다|했습니다|하세요|해요|했어요|됐어요|되나요|되죠|되네요|인가요|일까요|될까요|까요|나요|죠|지요|네요|군요|어요|아요|예요|이에요|다)\s*$/.test(core);
-}
-
-/* 강제 확정 */
-function commitInterim(reason){
-  if (!interimText) return;
-
-  if (pendingCommitTimer) {
-    clearTimeout(pendingCommitTimer);
-    pendingCommitTimer = null;
-  }
-
-  const processed = applyPunctuationToFinal(interimText);
-  pushOrReplaceFinal(processed);
-
-  interimText = "";
-  renderOutput();
-}
-
-/* 타이머 */
-function startWatchers(){
-  stopWatchers();
-  lastUpdateAt = Date.now();
-
-  silenceTimer = setInterval(() => {
-    if (!recognizing) return;
-
-    const idle = Date.now() - lastUpdateAt;
-
-    if (idle >= MAX_SILENCE_MS && interimText) {
-      commitInterim("max-silence");
-      return;
-    }
-
-    if (interimText && seemsSentenceEnding(interimText)) {
-      if (!pendingCommitTimer) {
-        pendingCommitTimer = setTimeout(() => {
-          if (interimText && seemsSentenceEnding(interimText)) {
-            commitInterim("ending");
-          }
-          pendingCommitTimer = null;
-        }, ENDING_COMMIT_DELAY_MS);
-      }
-    } else {
-      if (pendingCommitTimer) {
-        clearTimeout(pendingCommitTimer);
-        pendingCommitTimer = null;
-      }
-    }
-  }, 120);
-}
-
-function stopWatchers(){
-  if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
-  if (pendingCommitTimer) { clearTimeout(pendingCommitTimer); pendingCommitTimer = null; }
-}
-
-/* 시작/중지 */
+/* ---------------------
+   시작/중지
+--------------------- */
 function startRecognition(){
   try {
     recognition.start();
     recognizing = true;
     shouldAutoRestart = true;
     setMicUI(true);
-    startWatchers();
   } catch (e) {
     console.warn("startRecognition error:", e);
   }
@@ -330,10 +234,7 @@ function stopRecognition(){
   try { recognition.stop(); } catch (e) { console.warn("stopRecognition error:", e); }
 
   recognizing = false;
-  interimText = "";
   setMicUI(false);
-  stopWatchers();
-  renderOutput();
 }
 
 micButton.addEventListener("click", () => {
@@ -341,57 +242,51 @@ micButton.addEventListener("click", () => {
   else stopRecognition();
 });
 
-/* ✅ 결과 처리: interim 누적 금지(마지막 값만) + 확장 final 교체 */
+/* ---------------------
+   ✅ 결과: final만 1번씩 추가
+--------------------- */
 recognition.onresult = (event) => {
-  lastUpdateAt = Date.now();
+  // continuous=false + interim=false라 결과는 거의 항상 0번째에 1개
+  const raw = event.results[0][0].transcript;
+  const processed = applyPunctuationToFinal(raw);
 
-  let newInterim = "";
-
-  for (let i = event.resultIndex; i < event.results.length; i++) {
-    const res = event.results[i];
-    const raw = res[0].transcript;
-
-    if (res.isFinal) {
-      const processed = applyPunctuationToFinal(raw);
-      pushOrReplaceFinal(processed);
-      newInterim = "";
-    } else {
-      newInterim = raw; // ✅ 마지막 interim만
-    }
-  }
-
-  const prev = interimText;
-  interimText = newInterim;
-
-  if (interimText !== prev) renderOutput();
+  finalText += processed + "\n";
+  output.value = finalText;
+  output.scrollTop = output.scrollHeight;
 };
 
-/* 자동 재시작 */
+/* ---------------------
+   ✅ 자동 재시작 (문장 1개 처리 후 다음 문장 계속 받기)
+--------------------- */
 recognition.onend = () => {
   if (shouldAutoRestart) {
-    setTimeout(() => { try { recognition.start(); } catch(e){} }, 80);
+    // 바로 재시작 (연속 받아쓰기처럼 동작)
+    setTimeout(() => {
+      try { recognition.start(); } catch(e){}
+    }, 80);
   } else {
     setMicUI(false);
   }
 };
 
-/* 오류 */
+/* ---------------------
+   오류 처리
+--------------------- */
 recognition.onerror = (event) => {
   console.error("음성 인식 오류:", event.error);
+
   if (event.error === "no-speech" || event.error === "aborted") return;
 
   shouldAutoRestart = false;
   recognizing = false;
   setMicUI(false);
-  stopWatchers();
 };
 
-/* 복사 */
+/* ---------------------
+   복사
+--------------------- */
 copyButton.addEventListener("click", async () => {
-  const finalBlock = lines.join("\n") + (lines.length ? "\n" : "");
-  const textOnly = copyFinalOnlyEl.checked
-    ? lines.join("\n") + (lines.length ? "\n" : "")
-    : (finalBlock + (interimText ? interimText : ""));
+  const textOnly = copyFinalOnlyEl.checked ? finalText : finalText;
 
   try {
     await navigator.clipboard.writeText(textOnly);
@@ -402,20 +297,18 @@ copyButton.addEventListener("click", async () => {
   }
 });
 
-/* 내용 지우기 */
+/* ---------------------
+   내용 지우기
+--------------------- */
 clearButton.addEventListener("click", () => {
-  interimText = "";
-  lines = [];
+  finalText = "";
   output.value = "";
   output.scrollTop = 0;
-
-  recentFinalMap.clear();
-  lastCommittedLineKey = "";
-  lastFinalAt = 0;
-  lastUpdateAt = Date.now();
 });
 
-/* 정리 */
+/* ---------------------
+   정리
+--------------------- */
 window.addEventListener("beforeunload", () => {
   try { recognition.abort(); } catch(e){}
 });
