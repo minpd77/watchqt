@@ -5,11 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>음성 받아쓰기</title>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    text-align: center;
-    margin-top: 80px;
-  }
+  body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; }
 
   #micRow{
     display: inline-flex;
@@ -19,15 +15,9 @@
   }
 
   #micButton {
-    width: 100px;
-    height: 100px;
-    border-radius: 50%;
-    border: none;
-    font-size: 40px;
-    color: white;
-    cursor: pointer;
-    background-color: green;
-    flex: 0 0 auto;
+    width: 100px; height: 100px; border-radius: 50%;
+    border: none; font-size: 40px; color: white; cursor: pointer;
+    background-color: green; flex: 0 0 auto;
   }
 
   #recordHint {
@@ -40,42 +30,13 @@
     white-space: pre-line;
   }
 
-  #copyButton {
+  #copyButton, #clearButton {
     margin-top: 20px;
     padding: 10px 20px;
     font-size: 16px;
     cursor: pointer;
   }
-
-  #clearButton{
-    margin-top: 20px;
-    margin-left: 10px;
-    padding: 10px 20px;
-    font-size: 16px;
-    cursor: pointer;
-  }
-
-  #output {
-    margin-top: 30px;
-    width: 80%;
-    height: 200px;
-    font-size: 18px;
-  }
-
-  #copyAlert {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.8);
-    color: white;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    font-size: 40px;
-    z-index: 9999;
-  }
+  #clearButton { margin-left: 10px; }
 
   #optionsBar {
     margin-top: 16px;
@@ -86,6 +47,49 @@
     flex-wrap: wrap;
     color: #444;
     font-size: 14px;
+  }
+
+  /* ✅ 진행중 문장 표시 */
+  #liveRow{
+    margin: 18px auto 0;
+    width: 80%;
+    text-align: left;
+  }
+  #liveLabel{
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 6px;
+  }
+  #liveText{
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    background: #fafafa;
+    font-size: 18px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  #output {
+    margin-top: 16px;
+    width: 80%;
+    height: 200px;
+    font-size: 18px;
+  }
+
+  #copyAlert {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-color: rgba(0,0,0,0.8);
+    color: white;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    font-size: 40px;
+    z-index: 9999;
   }
 
   label { user-select: none; }
@@ -120,7 +124,12 @@
   </label>
 </div>
 
-<br>
+<!-- ✅ 진행중 문장(덮어쓰기) -->
+<div id="liveRow">
+  <div id="liveLabel">진행중 문장(확정 전)</div>
+  <div id="liveText"></div>
+</div>
+
 <textarea id="output" placeholder="음성이 텍스트로 변환됩니다..."></textarea>
 
 <div id="copyAlert">복사되었습니다!</div>
@@ -130,6 +139,7 @@ const micButton = document.getElementById("micButton");
 const copyButton = document.getElementById("copyButton");
 const clearButton = document.getElementById("clearButton");
 const output = document.getElementById("output");
+const liveTextEl = document.getElementById("liveText");
 const copyAlert = document.getElementById("copyAlert");
 const recordHintEl = document.getElementById("recordHint");
 
@@ -140,42 +150,35 @@ const spokenPunctEl = document.getElementById("spokenPunct");
 let recognizing = false;
 let shouldAutoRestart = false;
 
-// ✅ 이제부터는 “final만” 쌓는다 (interim 표시/누적 없음)
 let finalText = "";
+let lastLineKey = "";
 
 // Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-if (!SpeechRecognition) {
-  alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
-}
+if (!SpeechRecognition) alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
 
 const recognition = new SpeechRecognition();
 recognition.lang = "ko-KR";
 
-// ✅ 핵심: 확장 final/반복을 줄이기 위해 “한 번에 한 문장” 모드로
+/*
+  ✅ 안정 + 진행중 표시
+  - continuous=false: 확정 단위(문장/발화)로 깔끔
+  - interimResults=true: 진행중 문장 표시 가능
+*/
 recognition.continuous = false;
-
-// ✅ 핵심: interim 끄기 (중간 문장/확장 과정이 화면에 섞이지 않게)
-recognition.interimResults = false;
-
+recognition.interimResults = true;
 recognition.maxAlternatives = 1;
 
-/* ---------------------
-   UI
---------------------- */
+/* UI */
 function setMicUI(on){
   micButton.style.backgroundColor = on ? "red" : "green";
   recordHintEl.style.display = on ? "block" : "none";
 }
 
-/* ---------------------
-   구두점
---------------------- */
+/* 텍스트 처리 */
 function normalizeSpaces(s){
   return String(s ?? "").replace(/\s+/g, " ").trim();
 }
-
 function convertSpokenPunctuation(s){
   return s
     .replace(/\b쉼표\b/g, ",")
@@ -187,13 +190,12 @@ function convertSpokenPunctuation(s){
     .replace(/\b느낌표\b/g, "!")
     .replace(/\b엑스클러메이션\b/g, "!");
 }
-
 function applyPunctuationToFinal(text){
   let t = normalizeSpaces(text);
 
   if (spokenPunctEl.checked) {
     t = convertSpokenPunctuation(t);
-    t = t.replace(/\s*([,?.!])\s*/g, "$1 ");
+    t = t.replace(/\s*([,?.!…])\s*/g, "$1 ");
     t = t.replace(/\s+/g, " ").trim();
   }
 
@@ -210,14 +212,19 @@ function applyPunctuationToFinal(text){
       t = core + punct + tail;
     }
   }
+  return t.replace(/\s+$/g, "");
+}
 
-  t = t.replace(/\s+$/g, "");
+// 같은 문장 반복 방지 키
+function lineKey(s){
+  let t = normalizeSpaces(s);
+  t = t.replace(/[“”"']/g, "");
+  t = t.replace(/\s*([,?.!…])\s*/g, "$1");
+  t = t.replace(/[.?!…]+$/g, ".");
   return t;
 }
 
-/* ---------------------
-   시작/중지
---------------------- */
+/* 시작/중지 */
 function startRecognition(){
   try {
     recognition.start();
@@ -228,66 +235,73 @@ function startRecognition(){
     console.warn("startRecognition error:", e);
   }
 }
-
 function stopRecognition(){
   shouldAutoRestart = false;
   try { recognition.stop(); } catch (e) { console.warn("stopRecognition error:", e); }
-
   recognizing = false;
   setMicUI(false);
+  liveTextEl.textContent = ""; // 진행중 비우기
 }
-
 micButton.addEventListener("click", () => {
   if (!recognizing) startRecognition();
   else stopRecognition();
 });
 
-/* ---------------------
-   ✅ 결과: final만 1번씩 추가
---------------------- */
+/* ✅ 결과 처리
+   - interim: liveTextEl에 “덮어쓰기”로 표시
+   - final: output에 누적 (중복이면 스킵)
+*/
 recognition.onresult = (event) => {
-  // continuous=false + interim=false라 결과는 거의 항상 0번째에 1개
-  const raw = event.results[0][0].transcript;
-  const processed = applyPunctuationToFinal(raw);
+  let interim = "";
+  for (let i = event.resultIndex; i < event.results.length; i++){
+    const res = event.results[i];
+    const raw = res[0].transcript;
 
-  finalText += processed + "\n";
-  output.value = finalText;
-  output.scrollTop = output.scrollHeight;
+    if (res.isFinal) {
+      const processed = applyPunctuationToFinal(raw);
+      if (!processed) continue;
+
+      const k = lineKey(processed);
+      if (k && k === lastLineKey) continue;
+      lastLineKey = k;
+
+      finalText += processed + "\n";
+      output.value = finalText;
+      output.scrollTop = output.scrollHeight;
+
+      liveTextEl.textContent = ""; // final 나오면 진행중은 비움
+    } else {
+      interim = raw; // 마지막 interim만
+    }
+  }
+
+  // ✅ 진행중 문장 표시(덮어쓰기)
+  liveTextEl.textContent = interim ? normalizeSpaces(interim) : "";
 };
 
-/* ---------------------
-   ✅ 자동 재시작 (문장 1개 처리 후 다음 문장 계속 받기)
---------------------- */
+/* 자동 재시작 */
 recognition.onend = () => {
   if (shouldAutoRestart) {
-    // 바로 재시작 (연속 받아쓰기처럼 동작)
-    setTimeout(() => {
-      try { recognition.start(); } catch(e){}
-    }, 80);
+    setTimeout(() => { try { recognition.start(); } catch(e){} }, 80);
   } else {
     setMicUI(false);
   }
 };
 
-/* ---------------------
-   오류 처리
---------------------- */
+/* 오류 */
 recognition.onerror = (event) => {
   console.error("음성 인식 오류:", event.error);
-
   if (event.error === "no-speech" || event.error === "aborted") return;
 
   shouldAutoRestart = false;
   recognizing = false;
   setMicUI(false);
+  liveTextEl.textContent = "";
 };
 
-/* ---------------------
-   복사
---------------------- */
+/* 복사 */
 copyButton.addEventListener("click", async () => {
-  const textOnly = copyFinalOnlyEl.checked ? finalText : finalText;
-
+  const textOnly = copyFinalOnlyEl.checked ? finalText : (finalText + (liveTextEl.textContent ? liveTextEl.textContent : ""));
   try {
     await navigator.clipboard.writeText(textOnly);
     copyAlert.style.display = "flex";
@@ -297,18 +311,16 @@ copyButton.addEventListener("click", async () => {
   }
 });
 
-/* ---------------------
-   내용 지우기
---------------------- */
+/* 내용 지우기 */
 clearButton.addEventListener("click", () => {
   finalText = "";
+  lastLineKey = "";
   output.value = "";
   output.scrollTop = 0;
+  liveTextEl.textContent = "";
 });
 
-/* ---------------------
-   정리
---------------------- */
+/* 정리 */
 window.addEventListener("beforeunload", () => {
   try { recognition.abort(); } catch(e){}
 });
