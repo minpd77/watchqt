@@ -23,7 +23,6 @@
     height: 100px;
     border-radius: 50%;
     border: none;
-    font-size: 40%;
     font-size: 40px;
     color: white;
     cursor: pointer;
@@ -213,7 +212,7 @@ function applyPunctuationToFinal(text){
 
   if (spokenPunctEl.checked) {
     t = convertSpokenPunctuation(t);
-    t = t.replace(/\s*([,?.!])\s*/g, "$1 ");
+    t = t.replace(/\s*([,?.!…])\s*/g, "$1 ");
     t = t.replace(/\s+/g, " ").trim();
   }
 
@@ -257,7 +256,10 @@ function isDuplicateFinal(line){
   cleanupRecentFinals();
   const key = makeDedupeKey(line);
 
+  // 1) 방금 commit한 줄과 동일하면 스킵 (강제확정 후 엔진 final 재전송)
   if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
+
+  // 2) 최근 TTL 내 동일 final 스킵
   if (recentFinalMap.has(key)) return true;
 
   if (key) recentFinalMap.set(key, Date.now());
@@ -271,6 +273,7 @@ function seemsSentenceEnding(s){
   const t = normalizeSpaces(s);
   if (!t) return false;
 
+  // 이미 종결기호 있으면 끝난 걸로
   if (/[.?!…]+$/.test(t)) return true;
 
   const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
@@ -292,6 +295,7 @@ function commitInterim(reason){
 
   const processed = applyPunctuationToFinal(interimText);
 
+  // commit한 문장을 "방금 커밋"으로 기록
   lastCommittedLineKey = makeDedupeKey(processed);
   recentFinalMap.set(lastCommittedLineKey, Date.now());
 
@@ -301,7 +305,8 @@ function commitInterim(reason){
 }
 
 /* ---------------------
-   ✅ 타이머
+   ✅ 타이머: 1) 최대 2초 침묵이면 확정
+             2) 어미 감지되면 짧게(350ms) 후 확정
 --------------------- */
 function startWatchers(){
   stopWatchers();
@@ -312,11 +317,13 @@ function startWatchers(){
 
     const idle = Date.now() - lastUpdateAt;
 
+    // (A) 최대 2초 침묵이면 확정
     if (idle >= MAX_SILENCE_MS && interimText) {
       commitInterim("max-silence");
       return;
     }
 
+    // (B) 어미 감지면 짧게 대기 후 확정 예약
     if (interimText && seemsSentenceEnding(interimText)) {
       if (!pendingCommitTimer) {
         pendingCommitTimer = setTimeout(() => {
@@ -372,11 +379,13 @@ micButton.addEventListener("click", () => {
 });
 
 /* ---------------------
-   음성 결과
+   ✅ 음성 결과 (중요: interim은 누적(+=) 금지, 마지막 값으로 교체)
 --------------------- */
 recognition.onresult = (event) => {
-  interimText = "";
   lastUpdateAt = Date.now();
+
+  // ✅ interim은 "최신 1개"만 유지 (엔진이 전체 interim을 반복 전송해도 누적되지 않음)
+  let newInterim = "";
 
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
@@ -385,15 +394,26 @@ recognition.onresult = (event) => {
     if (res.isFinal) {
       const processed = applyPunctuationToFinal(raw);
 
+      // ✅ final 중복이면 누적하지 않음
       if (!isDuplicateFinal(processed)) {
         finalText += processed + "\n";
       }
+
+      // final이 들어오면 interim 겹침 방지
+      newInterim = "";
     } else {
-      interimText += raw;
+      // ✅ 마지막 interim만 채택 (누적 금지)
+      newInterim = raw;
     }
   }
 
-  renderOutput();
+  // ✅ 같은 interim이면 렌더 불필요 (깜빡임/중복 표시 방지)
+  const prev = interimText;
+  interimText = newInterim;
+
+  if (finalText || interimText !== prev) {
+    renderOutput();
+  }
 };
 
 /* ---------------------
@@ -442,21 +462,16 @@ copyButton.addEventListener("click", async () => {
    ✅ 내용 지우기
 --------------------- */
 clearButton.addEventListener("click", () => {
-  // 인식 중이면 안전하게 interim 확정 후 지우기(원치 않으면 commitInterim 라인 삭제)
-  if (interimText) {
-    // commitInterim("clear");  // ← 지우기 전에 임시 내용을 확정하고 싶으면 주석 해제
-    interimText = "";
-  }
-
+  // 인식 중이면 interim만 지움 (원하면 stopRecognition()으로 완전 종료도 가능)
+  interimText = "";
   finalText = "";
   output.value = "";
   output.scrollTop = 0;
 
-  // ✅ 중복방지 버퍼도 같이 리셋 (안 그러면 “지운 뒤” 동일 문장이 스킵될 수 있음)
+  // ✅ 중복방지 버퍼도 리셋 (지운 뒤 동일 문장이 스킵되는 문제 방지)
   recentFinalMap.clear();
   lastCommittedLineKey = "";
 
-  // 타이머 기준도 리셋
   lastUpdateAt = Date.now();
 });
 
