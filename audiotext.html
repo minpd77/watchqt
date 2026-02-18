@@ -22,7 +22,7 @@
     align-items: center; justify-content: center; flex-wrap: wrap;
   }
   #copyButton, #clearButton { padding: 10px 20px; font-size: 16px; cursor: pointer; }
-  #output { margin-top: 30px; width: 80%; height: 200px; font-size: 18px; }
+  #output { margin-top: 30px; width: 80%; height: 220px; font-size: 18px; }
   #copyAlert {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background-color: rgba(0,0,0,0.8); color: white; display: none;
@@ -89,7 +89,8 @@ const spokenPunctEl = document.getElementById("spokenPunct");
 let recognizing = false;
 let shouldAutoRestart = false;
 
-let finalText = "";
+// ✅ 최종 줄들을 배열로 관리 (중요: “확장 final”이면 마지막 줄 교체)
+let lines = [];
 let interimText = "";
 
 // ✅ 1초 침묵이면 확정
@@ -105,9 +106,12 @@ const RECENT_FINAL_TTL_MS = 8000;
 const recentFinalMap = new Map();
 let lastCommittedLineKey = "";
 
+// ✅ “확장 final” 교체 판단용
+let lastFinalAt = 0;
+const EXPAND_WINDOW_MS = 4000; // 4초 안에 온 확장 final이면 교체 시도
+
 // Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
 if (!SpeechRecognition) {
   alert("이 브라우저는 음성 인식을 지원하지 않습니다.\n(참고: iOS 사파리는 Web Speech API가 제한될 수 있습니다.)");
 }
@@ -123,49 +127,16 @@ function setMicUI(on){
   micButton.style.backgroundColor = on ? "red" : "green";
   recordHintEl.style.display = on ? "block" : "none";
 }
+
 function renderOutput(){
-  output.value = finalText + (interimText ? interimText : "");
+  const finalBlock = lines.join("\n");
+  output.value = finalBlock + (interimText ? (finalBlock ? "\n" : "") + interimText : "");
   output.scrollTop = output.scrollHeight;
 }
 
 /* 텍스트 유틸 */
 function normalizeSpaces(s){
   return String(s ?? "").replace(/\s+/g, " ").trim();
-}
-
-/* ✅ UI/옵션 단어가 섞인 “헛문장” 필터 */
-const noisyTokens = [
-  // 안내문/상태
-  "인식", "받아쓰기", "마이크", "종료", "됩니다", "누르면",
-  // 버튼/옵션 텍스트
-  "복사", "확정", "자동", "구두점", "말한", "변환",
-  // 흔한 오염 토큰
-  "두 점", "콜론", "쉼표", "마침표", "물음표", "느낌표"
-];
-
-// 필요하면 여기에 더 추가 가능 (예: "음식 중" 같은 특정 오인식)
-const blockedPhrases = [
-  "인식 중 음성 받아쓰기 중 마이크를 누르면 종료 됩니다",
-  "음성 받아쓰기 중 마이크를 누르면 종료 됩니다"
-];
-
-function looksLikeUIJunk(text){
-  const t = normalizeSpaces(text);
-  if (!t) return true;
-
-  // 1) 완전 일치/포함 기반 차단
-  for (const p of blockedPhrases){
-    if (t.includes(p)) return true;
-  }
-
-  // 2) UI 토큰이 여러 개 섞이면(예: "복사 확정 자동") 버림
-  let hit = 0;
-  for (const tok of noisyTokens){
-    if (t.includes(tok)) hit++;
-    if (hit >= 2) return true; // ✅ 2개 이상이면 UI 오염으로 판단
-  }
-
-  return false;
 }
 
 /* 구두점 */
@@ -203,7 +174,17 @@ function applyPunctuationToFinal(text){
       t = core + punct + tail;
     }
   }
+
   return t.replace(/\s+$/g, "");
+}
+
+/* ✅ “확장 final” 비교용 키 (끝 구두점/공백 차이 무시) */
+function coreKey(s){
+  let t = normalizeSpaces(s);
+  t = t.replace(/[“”"']/g, "");
+  t = t.replace(/\s*([,?.!…])\s*/g, "$1");
+  t = t.replace(/[.?!…]+$/g, ""); // 끝 종결부호 제거
+  return t;
 }
 
 /* 중복 방지 */
@@ -212,22 +193,57 @@ function makeDedupeKey(s){
   t = t.replace(/\s+/g, " ").trim();
   t = t.replace(/[“”"']/g, "");
   t = t.replace(/\s*([,?.!…])\s*/g, "$1");
-  t = t.replace(/[.?!…]+$/g, ".");
+  t = t.replace(/[.?!…]+$/g, "."); // 끝 구두점 차이 무시
   return t;
 }
+
 function cleanupRecentFinals(){
   const now = Date.now();
   for (const [k, ts] of recentFinalMap.entries()){
     if (now - ts > RECENT_FINAL_TTL_MS) recentFinalMap.delete(k);
   }
 }
+
 function isDuplicateFinal(line){
   cleanupRecentFinals();
   const key = makeDedupeKey(line);
+
   if (key && lastCommittedLineKey && key === lastCommittedLineKey) return true;
   if (recentFinalMap.has(key)) return true;
+
   if (key) recentFinalMap.set(key, Date.now());
   return false;
+}
+
+/* ✅ final을 lines에 넣는 핵심 함수: "확장 final"이면 마지막 줄 교체 */
+function pushOrReplaceFinal(processed){
+  const now = Date.now();
+
+  // 중복이면 무시
+  if (isDuplicateFinal(processed)) return;
+
+  const curCore = coreKey(processed);
+
+  if (lines.length > 0 && (now - lastFinalAt) <= EXPAND_WINDOW_MS) {
+    const lastLine = lines[lines.length - 1];
+    const lastCore = coreKey(lastLine);
+
+    // ✅ 새 문장이 "이전 문장으로 시작"하면 (= 확장판) 마지막 줄을 교체
+    // 예: "안녕하세요." -> "안녕하세요 알프스." -> ...
+    if (curCore.startsWith(lastCore) && curCore.length >= lastCore.length) {
+      lines[lines.length - 1] = processed;
+      lastCommittedLineKey = makeDedupeKey(processed);
+      recentFinalMap.set(lastCommittedLineKey, Date.now());
+      lastFinalAt = now;
+      return;
+    }
+  }
+
+  // 그렇지 않으면 새 줄로 추가
+  lines.push(processed);
+  lastCommittedLineKey = makeDedupeKey(processed);
+  recentFinalMap.set(lastCommittedLineKey, Date.now());
+  lastFinalAt = now;
 }
 
 /* 문장 끝 어미 감지 */
@@ -252,18 +268,8 @@ function commitInterim(reason){
   }
 
   const processed = applyPunctuationToFinal(interimText);
+  pushOrReplaceFinal(processed);
 
-  // ✅ UI 오염 문장 버림
-  if (looksLikeUIJunk(processed)) {
-    interimText = "";
-    renderOutput();
-    return;
-  }
-
-  lastCommittedLineKey = makeDedupeKey(processed);
-  recentFinalMap.set(lastCommittedLineKey, Date.now());
-
-  finalText += processed + "\n";
   interimText = "";
   renderOutput();
 }
@@ -300,6 +306,7 @@ function startWatchers(){
     }
   }, 120);
 }
+
 function stopWatchers(){
   if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
   if (pendingCommitTimer) { clearTimeout(pendingCommitTimer); pendingCommitTimer = null; }
@@ -317,6 +324,7 @@ function startRecognition(){
     console.warn("startRecognition error:", e);
   }
 }
+
 function stopRecognition(){
   shouldAutoRestart = false;
   try { recognition.stop(); } catch (e) { console.warn("stopRecognition error:", e); }
@@ -327,12 +335,13 @@ function stopRecognition(){
   stopWatchers();
   renderOutput();
 }
+
 micButton.addEventListener("click", () => {
   if (!recognizing) startRecognition();
   else stopRecognition();
 });
 
-/* ✅ 결과 처리: interim 누적 금지 + UI오염 필터 + final 중복 방지 */
+/* ✅ 결과 처리: interim 누적 금지(마지막 값만) + 확장 final 교체 */
 recognition.onresult = (event) => {
   lastUpdateAt = Date.now();
 
@@ -344,22 +353,16 @@ recognition.onresult = (event) => {
 
     if (res.isFinal) {
       const processed = applyPunctuationToFinal(raw);
-
-      // ✅ UI 오염이면 버림
-      if (looksLikeUIJunk(processed)) continue;
-
-      if (!isDuplicateFinal(processed)) {
-        finalText += processed + "\n";
-      }
+      pushOrReplaceFinal(processed);
       newInterim = "";
     } else {
-      // interim도 UI오염이면 표시하지 않음
-      if (!looksLikeUIJunk(raw)) newInterim = raw;
+      newInterim = raw; // ✅ 마지막 interim만
     }
   }
 
   const prev = interimText;
   interimText = newInterim;
+
   if (interimText !== prev) renderOutput();
 };
 
@@ -385,7 +388,11 @@ recognition.onerror = (event) => {
 
 /* 복사 */
 copyButton.addEventListener("click", async () => {
-  const textOnly = copyFinalOnlyEl.checked ? finalText : (finalText + (interimText ? interimText : ""));
+  const finalBlock = lines.join("\n") + (lines.length ? "\n" : "");
+  const textOnly = copyFinalOnlyEl.checked
+    ? lines.join("\n") + (lines.length ? "\n" : "")
+    : (finalBlock + (interimText ? interimText : ""));
+
   try {
     await navigator.clipboard.writeText(textOnly);
     copyAlert.style.display = "flex";
@@ -398,12 +405,13 @@ copyButton.addEventListener("click", async () => {
 /* 내용 지우기 */
 clearButton.addEventListener("click", () => {
   interimText = "";
-  finalText = "";
+  lines = [];
   output.value = "";
   output.scrollTop = 0;
 
   recentFinalMap.clear();
   lastCommittedLineKey = "";
+  lastFinalAt = 0;
   lastUpdateAt = Date.now();
 });
 
