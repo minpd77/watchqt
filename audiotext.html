@@ -1,330 +1,1285 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>음성 받아쓰기</title>
-<style>
-  body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; }
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SRT 한글→일본어 교체 (SRT 타이밍 고정)</title>
 
-  #micRow{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 18px;
-  }
+  <style>
+    :root { --gap: 14px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h2 { margin: 0 0 8px; display:flex; align-items:center; gap:10px; }
 
-  #micButton {
-    width: 100px; height: 100px; border-radius: 50%;
-    border: none; font-size: 40px; color: white; cursor: pointer;
-    background-color: green; flex: 0 0 auto;
-  }
+    .helpBtn{
+      width:28px; height:28px; border-radius:999px;
+      border:1px solid #333; background:#fff; color:#111;
+      display:inline-flex; align-items:center; justify-content:center;
+      font-weight:900; cursor:pointer; user-select:none;
+    }
+    .helpBtn:hover{ background:#f2f2f2; }
 
-  #recordHint {
-    display: none;
-    color: red;
-    font-size: 250%;
-    font-weight: 800;
-    line-height: 1.2;
-    text-align: left;
-    white-space: pre-line;
-  }
+    .modalBackdrop{
+      position:fixed; inset:0;
+      background: rgba(0,0,0,.45);
+      display:none;
+      align-items:center; justify-content:center;
+      z-index:9999;
+      padding: 18px;
+    }
+    .modal{
+      width:min(780px, 96vw);
+      background:#fff;
+      border-radius:14px;
+      border:1px solid #e5e5e5;
+      box-shadow: 0 16px 40px rgba(0,0,0,.25);
+      overflow:hidden;
+    }
+    .modalHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px;
+      border-bottom:1px solid #eee;
+      background:#fcfcfc;
+      font-weight:900;
+    }
+    .modalClose{
+      border:1px solid #333; background:#fff; color:#111;
+      border-radius:10px; padding:6px 10px; cursor:pointer;
+      font-weight:800;
+    }
+    .modalBody{ padding:14px 16px; }
+    .modalBody ul{ margin:0; padding-left: 18px; }
+    .modalBody li{ margin: 8px 0; line-height:1.5; }
 
-  #copyButton, #clearButton {
-    margin-top: 20px;
-    padding: 10px 20px;
-    font-size: 16px;
-    cursor: pointer;
-  }
-  #clearButton { margin-left: 10px; }
+    .topbar{
+      display:flex; gap:var(--gap); flex-wrap:wrap; align-items:flex-end;
+      border:1px solid #e5e5e5; border-radius:12px; padding:12px; background:#fafafa;
+    }
+    .topbar .col{ min-width:280px; flex:1; }
 
-  #optionsBar {
-    margin-top: 16px;
-    display: inline-flex;
-    gap: 14px;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    color: #444;
-    font-size: 14px;
-  }
+    label{ display:block; font-weight:800; margin:8px 0 6px; }
+    input[type="file"]{ width:100%; }
 
-  /* ✅ 진행중 문장 표시 */
-  #liveRow{
-    margin: 18px auto 0;
-    width: 80%;
-    text-align: left;
-  }
-  #liveLabel{
-    font-size: 13px;
-    color: #666;
-    margin-bottom: 6px;
-  }
-  #liveText{
-    min-height: 42px;
-    padding: 10px 12px;
-    border: 1px solid #ddd;
-    border-radius: 10px;
-    background: #fafafa;
-    font-size: 18px;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+    .dropzone{
+      border:2px dashed #999; border-radius:12px; padding:14px; background:#fff;
+      cursor:pointer; user-select:none; transition:.15s;
+    }
+    .dropzone b{ font-weight:900; }
+    .dropzone .small{ font-size:12px; color:#666; margin-top:6px; line-height:1.35; }
+    .dropzone.dragover{ border-color:#111; background:#f1f1f1; }
 
-  #output {
-    margin-top: 16px;
-    width: 80%;
-    height: 200px;
-    font-size: 18px;
-  }
+    select{
+      width:100%; padding:8px 10px; border-radius:10px; border:1px solid #ccc; background:#fff;
+    }
 
-  #copyAlert {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background-color: rgba(0,0,0,0.8);
-    color: white;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    font-size: 40px;
-    z-index: 9999;
-  }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+    button{
+      padding:10px 14px; border-radius:10px; border:1px solid #333;
+      background:#111; color:#fff; cursor:pointer;
+    }
+    button:disabled{ opacity:.5; cursor:not-allowed; }
 
-  label { user-select: none; }
-</style>
+    .status{ margin-top:8px; font-size:14px; }
+    .status b{ font-weight:900; }
+
+    .cfg{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .cfg input[type="checkbox"]{ transform: translateY(1px); }
+
+    .pill{
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      border:1px solid #ddd; font-size:12px; color:#444; background:#fff;
+    }
+
+    .grid{
+      margin-top:var(--gap);
+      display:grid; grid-template-columns:1.15fr 0.85fr; gap:var(--gap);
+      height: calc(100vh - 255px);
+      min-height: 800px;
+    }
+    .panel{
+      border:1px solid #e5e5e5; border-radius:12px; overflow:hidden;
+      display:flex; flex-direction:column; background:#fff;
+    }
+    .panelHeader{
+      padding:10px 12px; border-bottom:1px solid #eee; background:#fcfcfc;
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    .panelHeader .title{ font-weight:900; }
+    .panelHeader .small{ font-size:12px; color:#666; }
+    .panelBody{ padding:12px; overflow:auto; flex:1; }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:12px;
+      table-layout: fixed;
+    }
+    th, td{ border:1px solid #eee; padding:8px; vertical-align:top; font-size:13px; }
+    th{ background:#fafafa; position:sticky; top:0; z-index:2; }
+    tr.unmatched{ background:#ffe5e5; }
+    tr.mergeWarn { background: #fff8cc; } /* 연노랑 */
+    /* ✅ 추가: 0.90 이상(정확 1.00 제외) 매칭도 노랑 */
+    tr.nearWarn { background: #fff8cc; } /* 연노랑 */
+
+    tr.clickable{ cursor:pointer; }
+    tr.clickable:hover{ outline:2px solid #111; outline-offset:-2px; }
+    tr.selectedRow{ outline:3px solid #111; outline-offset:-3px; }
+
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .ok{ color:#0a7; font-weight:900; }
+    .bad{ color:#c00; font-weight:900; }
+
+    /* table width tuning */
+    th.colIdx, td.colIdx { width: 15px; }
+    th.colTime, td.colTime { width: 60px; }
+    td.colTime { font-size: 8px; }
+
+    th.colKo, td.colKo { width: 300px; }
+    th.colJp, td.colJp { width: 360px; }
+    th.colStat, td.colStat { width: 120px; }
+
+    .jpEdit{
+      width:100%;
+      min-height:56px;
+      resize:vertical;
+      padding:8px;
+      border-radius:10px;
+      border:1px solid #ccc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      line-height:1.35;
+      background:#fff;
+      box-sizing: border-box;
+    }
+    .jpEdit.fail{ border-color:#c00; background:#fff6f6; }
+
+    /* DOCX view */
+    .docxWrap{
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 10px;
+      background: #fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .docLine{
+      display:block;
+      padding: 2px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .docLine:hover{ background:#f2f2f2; }
+    .docLine.selected{ background:#ffe9a8; }
+    .docBlank{ height: 10px; }
+
+    .findBox{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .findBox input{ width:220px; padding:6px 10px; border-radius:10px; border:1px solid #ccc; }
+
+    .smallNote{ font-size:12px; color:#666; line-height:1.35; margin-top:8px; }
+  </style>
+
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
 </head>
+
 <body>
+  <h2>
+    SRT 한글 → 일본어 자동 교체 (SRT 타이밍 고정)
+    <span id="helpBtn" class="helpBtn" title="도움말">?</span>
+  </h2>
 
-<div id="micRow">
-  <button id="micButton">🎤</button>
-  <div id="recordHint">인식중...
-음성 받아쓰기 중.... 마이크를 누르면 종료 됩니다.</div>
-</div>
+  <div id="helpModal" class="modalBackdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="modalHeader">
+        <div id="helpTitle">도움말</div>
+        <button id="helpClose" class="modalClose">닫기</button>
+      </div>
+      <div class="modalBody">
+        <ul>
+          <li>✅ <b>SRT 블록(번호/시간) 그대로 유지</b>하고, 각 블록 한글에 해당하는 DOCX 일본어를 넣습니다.</li>
+          <li>오른쪽 DOCX는 <b>줄 클릭</b>으로 왼쪽 치환칸에 삽입(드래그 안 씀).</li>
+          <li><b>일어–일어 사이 빈 줄 제거</b> + 삽입 시에도 <b>빈 줄 일괄 제거</b></li>
+          <li><b>제목(한글)</b> 블록은 <b>タイトル / 本　　文</b> 값을 2줄로 출력</li>
+          <li><b>숫자만 블록(1,2,3...)</b>은 <b>[오프닝 멘트] 이전까지만</b> DOCX 원고(1 〜)로 대체</li>
+          <li><b>“10절 …”</b> 같이 시작하면 verse=10으로 보고 <b>DOCX 원고 10…</b>을 우선 삽입</li>
+          <li><b>병합 매칭</b>: 현재 FAIL인데, (현재+다음)으로 0.95급 매칭되면 현재 행에 일본어를 넣고 <b>연노랑 표시</b>합니다. (단, 다음 문장 키와 같은 키면 병합 금지)</li>
+          <li><b>추가</b>: 매칭 점수 <b>0.90 이상(정확 1.00 제외)</b>인 행도 <b>연노랑</b>으로 표시합니다.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 
-<br>
-<button id="copyButton">복사하기</button>
-<button id="clearButton">내용 지우기</button>
+  <div class="topbar">
+    <div class="col">
+      <div id="dropzone" class="dropzone" tabindex="0">
+        <b>여기에 SRT 또는 DOCX 파일을 드래그&드롭</b><br/>
+        <div class="small">또는 아래에서 파일 선택 / 최근 파일 선택</div>
+      </div>
 
-<div id="optionsBar">
-  <label>
-    <input type="checkbox" id="copyFinalOnly" checked />
-    복사 시 확정(final)만
-  </label>
+      <label>1) SRT 파일(한국어)</label>
+      <input id="srtFile" type="file" accept=".srt,text/plain" />
 
-  <label>
-    <input type="checkbox" id="autoPunct" checked />
-    자동 구두점(. ? !)
-  </label>
+      <label>최근 SRT</label>
+      <select id="recentSrt" disabled><option value="">(없음)</option></select>
+    </div>
 
-  <label title="예: '쉼표', '마침표'를 말하면 기호로 바꿉니다">
-    <input type="checkbox" id="spokenPunct" checked />
-    말한 구두점 변환(쉼표/마침표/물음표/느낌표)
-  </label>
-</div>
+    <div class="col">
+      <label>2) Word 번역 파일(.docx)</label>
+      <input id="docxFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
 
-<!-- ✅ 진행중 문장(덮어쓰기) -->
-<div id="liveRow">
-  <div id="liveLabel">진행중 문장(확정 전)</div>
-  <div id="liveText"></div>
-</div>
+      <label>최근 DOCX</label>
+      <select id="recentDocx" disabled><option value="">(없음)</option></select>
+    </div>
 
-<textarea id="output" placeholder="음성이 텍스트로 변환됩니다..."></textarea>
+    <div class="col" style="min-width: 440px;">
+      <div class="cfg">
+        <span class="pill">[オープニングコメント] 제거</span>
+        <label style="display:inline-flex; gap:6px; align-items:center; font-weight:700;">
+          <input id="dropOpeningLabel" type="checkbox" checked /> ON
+        </label>
+      </div>
 
-<div id="copyAlert">복사되었습니다!</div>
+      <div class="controls">
+        <button id="runBtn" disabled>변환 실행</button>
+        <button id="dlBtn" disabled>결과 SRT 다운로드</button>
+      </div>
+
+      <div class="status" id="status">파일을 올려주세요.</div>
+      <div class="smallNote">
+        ※ 다운로드 파일명: <b>[SRT의 8자리날짜]_jp.srt</b> (예: 20260218_jp.srt)
+      </div>
+      <div class="smallNote">
+        ※ 표의 일본어 편집칸을 클릭해 둔 뒤, 오른쪽 DOCX에서 <b>일본어 줄 클릭</b>하면 자동 삽입됩니다.
+        (기존 값 있으면 <b>아래줄로 추가</b>) / 삽입·수정하면 자동 OK
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panelHeader">
+        <div>
+          <div class="title">결과(왼쪽)</div>
+          <div class="small">매칭 상세(일본어 편집 가능) / 행 클릭 → 오른쪽 DOCX 하이라이트/이동</div>
+        </div>
+        <div class="small" id="leftStat"></div>
+      </div>
+
+      <div class="panelBody">
+        <div class="pill">매칭 상세</div>
+
+        <div style="max-height: 1000px; overflow:auto; border:1px solid #eee; border-radius: 12px; margin-top:8px;">
+          <table>
+            <thead>
+              <tr>
+                <th class="colIdx">#</th>
+                <th class="colTime">시간</th>
+                <th class="colKo">원문(한글)</th>
+                <th class="colJp">치환(일본어, 편집)</th>
+                <th class="colStat">상태</th>
+              </tr>
+            </thead>
+            <tbody id="detailBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panelHeader">
+        <div>
+          <div class="title">DOCX 원문(오른쪽)</div>
+          <div class="small">일본어 줄 클릭 → 왼쪽 치환칸에 삽입</div>
+        </div>
+
+        <div class="findBox">
+          <input id="docFind" type="text" placeholder="오른쪽 내용 검색(하이라이트)" />
+          <button id="findBtn" disabled style="background:#fff;color:#111;border:1px solid #333;">찾기</button>
+          <button id="clearFindBtn" disabled style="background:#fff;color:#111;border:1px solid #333;">해제</button>
+        </div>
+      </div>
+
+      <div class="panelBody">
+        <div id="docxView" class="docxWrap">(DOCX 파일을 올리면 여기에 내용이 표시됩니다)</div>
+      </div>
+    </div>
+  </div>
 
 <script>
-const micButton = document.getElementById("micButton");
-const copyButton = document.getElementById("copyButton");
-const clearButton = document.getElementById("clearButton");
-const output = document.getElementById("output");
-const liveTextEl = document.getElementById("liveText");
-const copyAlert = document.getElementById("copyAlert");
-const recordHintEl = document.getElementById("recordHint");
+(() => {
+  const $ = (id) => document.getElementById(id);
 
-const copyFinalOnlyEl = document.getElementById("copyFinalOnly");
-const autoPunctEl = document.getElementById("autoPunct");
-const spokenPunctEl = document.getElementById("spokenPunct");
+  const recent = { srt: [], docx: [] };
+  let srtText = "";
+  let docxTextRaw = "";
 
-let recognizing = false;
-let shouldAutoRestart = false;
+  let srtFileNameBase = "output";
 
-let finalText = "";
-let lastLineKey = "";
+  let lastBlocks = [];
+  let lastReport = [];
 
-// Web Speech API
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SpeechRecognition) alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
+  let docTitleExtract = { title: "", passage: "" };
+  let docManuscriptMap = new Map();
 
-const recognition = new SpeechRecognition();
-recognition.lang = "ko-KR";
+  let docxViewLines = [];
+  let lastFocusedTextarea = null;
 
-/*
-  ✅ 안정 + 진행중 표시
-  - continuous=false: 확정 단위(문장/발화)로 깔끔
-  - interimResults=true: 진행중 문장 표시 가능
-*/
-recognition.continuous = false;
-recognition.interimResults = true;
-recognition.maxAlternatives = 1;
+  const statusEl = $("status");
+  const runBtn = $("runBtn");
+  const dlBtn = $("dlBtn");
+  const detailBody = $("detailBody");
+  const leftStat = $("leftStat");
 
-/* UI */
-function setMicUI(on){
-  micButton.style.backgroundColor = on ? "red" : "green";
-  recordHintEl.style.display = on ? "block" : "none";
-}
+  const docxView = $("docxView");
+  const docFind = $("docFind");
+  const findBtn = $("findBtn");
+  const clearFindBtn = $("clearFindBtn");
 
-/* 텍스트 처리 */
-function normalizeSpaces(s){
-  return String(s ?? "").replace(/\s+/g, " ").trim();
-}
-function convertSpokenPunctuation(s){
-  return s
-    .replace(/\b쉼표\b/g, ",")
-    .replace(/\b콤마\b/g, ",")
-    .replace(/\b마침표\b/g, ".")
-    .replace(/\b피리어드\b/g, ".")
-    .replace(/\b물음표\b/g, "?")
-    .replace(/\b퀘스천마크\b/g, "?")
-    .replace(/\b느낌표\b/g, "!")
-    .replace(/\b엑스클러메이션\b/g, "!");
-}
-function applyPunctuationToFinal(text){
-  let t = normalizeSpaces(text);
+  const recentSrtSel = $("recentSrt");
+  const recentDocxSel = $("recentDocx");
+  const dropzone = $("dropzone");
 
-  if (spokenPunctEl.checked) {
-    t = convertSpokenPunctuation(t);
-    t = t.replace(/\s*([,?.!…])\s*/g, "$1 ");
-    t = t.replace(/\s+/g, " ").trim();
+  const helpBtn = $("helpBtn");
+  const helpModal = $("helpModal");
+  const helpClose = $("helpClose");
+
+  function openHelp() { helpModal.style.display = "flex"; helpModal.setAttribute("aria-hidden", "false"); }
+  function closeHelp() { helpModal.style.display = "none"; helpModal.setAttribute("aria-hidden", "true"); }
+  helpBtn.addEventListener("click", openHelp);
+  helpClose.addEventListener("click", closeHelp);
+  helpModal.addEventListener("click", (e) => { if (e.target === helpModal) closeHelp(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHelp(); });
+
+  function setStatus(html) { statusEl.innerHTML = html; }
+  function canRun() { return srtText.trim().length > 0 && docxTextRaw.trim().length > 0; }
+  function updateRunBtn() { runBtn.disabled = !canRun(); }
+
+  function upsertRecent(list, item) {
+    const idx = list.findIndex(x => x.name === item.name);
+    if (idx >= 0) list.splice(idx, 1);
+    list.unshift(item);
+    if (list.length > 8) list.length = 8;
+  }
+  function refreshRecentSelects() {
+    recentSrtSel.innerHTML = `<option value="">(선택)</option>` +
+      recent.srt.map((x, i) => `<option value="${i}">${x.name}</option>`).join("");
+    recentSrtSel.disabled = recent.srt.length === 0;
+
+    recentDocxSel.innerHTML = `<option value="">(선택)</option>` +
+      recent.docx.map((x, i) => `<option value="${i}">${x.name}</option>`).join("");
+    recentDocxSel.disabled = recent.docx.length === 0;
   }
 
-  if (autoPunctEl.checked) {
-    if (!/[.?!…]+$/.test(t) && !/,$/.test(t)) {
-      const mm = t.match(/^(.*?)([)\]\}"'’”]+)?$/);
-      const core = (mm && mm[1]) ? mm[1].trim() : t.trim();
-      const tail = (mm && mm[2]) ? mm[2] : "";
+  function hasHangul(str) { return /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(str); }
+  function hasJapanese(str) { return /[\u3040-\u30ff\u4e00-\u9fff]/.test(str); }
 
-      let punct = ".";
-      if (/(까|나요|니|냐|습니까|인가요|인가|가요)\s*$/.test(core)) punct = "?";
-      else if (/(야|자|아|어|해|봐|좋아|대박|진짜|와|헐)\s*$/.test(core)) punct = "!";
+  function normalizeKo(str) {
+    return (str || "")
+      .replace(/\uFEFF/g, "")
+      .replace(/[“”"]/g, "")
+      .replace(/\s+/g, "")
+      .replace(/[·…]/g, "")
+      .replace(/[=.,:;!?()]/g, "")
+      .trim();
+  }
 
-      t = core + punct + tail;
+  function cleanKoKey(line) {
+    const m = (line || "").match(/^(.{1,30})\s*:\s*(.+)$/);
+    if (m) {
+      const left = m[1].trim();
+      const right = m[2].trim();
+      if (left.startsWith("[") && left.endsWith("]")) return right;
+      if (left.length <= 8) return right;
+    }
+    return (line || "").trim();
+  }
+
+  function normalizeTimeLine(t) { return (t || "").trim(); }
+
+  function isNumericOnlyBody(body) {
+    const s = (body || "").trim();
+    return /^\d+$/.test(s);
+  }
+
+  function isNumericExpressionBody(body) {
+    const s = (body || "").trim();
+    if (!s) return false;
+    return /^[0-9\s=+\-*/().,:;]+$/.test(s);
+  }
+
+  function isTitleMarker(body) {
+    return (body || "").replace(/\s+/g, "").trim() === "제목";
+  }
+
+  function isOpeningMarker(body) {
+    const s = (body || "").trim();
+    return s.startsWith("[오프닝 멘트]") || s.startsWith("[오프닝멘트]") || s.startsWith("[오프닝") || s.startsWith("오프닝 멘트");
+  }
+
+  function isMergeCandidateBody(body) {
+    const s = (body || "").trim();
+    if (!s) return false;
+    if (isTitleMarker(s)) return false;
+    if (isNumericOnlyBody(s)) return false;
+    if (isOpeningMarker(s)) return false;
+    return true;
+  }
+
+  function extractVerseNumberFromKo(body) {
+    const s0 = (body || "").trim();
+    if (!s0) return null;
+
+    const s = s0
+      .replace(/\uFEFF/g, "")
+      .replace(/[（]/g, "(").replace(/[）]/g, ")")
+      .replace(/[［]/g, "[").replace(/[］]/g, "]")
+      .replace(/[｛]/g, "{").replace(/[｝]/g, "}")
+      .replace(/[〈]/g, "<").replace(/[〉]/g, ">")
+      .replace(/[《]/g, "<").replace(/[》]/g, ">")
+      .replace(/[「]/g, "\"").replace(/[」]/g, "\"")
+      .replace(/[『]/g, "\"").replace(/[』]/g, "\"")
+      .replace(/[“”]/g, "\"")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    let m = s.match(/^[\s\(\[\{<"']*(\d{1,3})\s*절\b/);
+    if (m) return Number(m[1]);
+
+    m = s.match(/[\(\[\{<"']\s*(\d{1,3})\s*절\s*[\)\]\}>\"']/);
+    if (m) return Number(m[1]);
+
+    m = s.match(/\b(\d{1,3})\s*절\b/);
+    if (m) return Number(m[1]);
+
+    return null;
+  }
+
+  function computeSrtBaseName(filename) {
+    const name = (filename || "").replace(/^.*[\\/]/, "");
+    const noExt = name.replace(/\.[^.]+$/, "");
+    const m = noExt.match(/(\d{8})/);
+    if (m && m[1]) return m[1];
+    return noExt || "output";
+  }
+
+  function parseSrt(text) {
+    const blocks = text.replace(/\r/g, "").split(/\n\s*\n/);
+    const items = [];
+    for (const blk of blocks) {
+      const lines = blk.split("\n");
+      if (lines.length < 2) continue;
+
+      const idx = (lines[0] || "").trim();
+      const time = normalizeTimeLine(lines[1] || "");
+      const body = lines.slice(2).join("\n").trim();
+
+      if (!time.includes("-->")) continue;
+      items.push({ idx: idx || String(items.length + 1), time, body });
+    }
+    return items;
+  }
+
+  // ===== fuzzy helpers =====
+  function makeBigrams(s) {
+    const x = (s || "").trim();
+    const arr = [];
+    for (let i = 0; i < x.length - 1; i++) arr.push(x.slice(i, i + 2));
+    return arr;
+  }
+
+  function diceSim(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+
+    const A = makeBigrams(a);
+    const B = makeBigrams(b);
+    if (A.length === 0 || B.length === 0) return 0;
+
+    const map = new Map();
+    for (const g of A) map.set(g, (map.get(g) || 0) + 1);
+
+    let inter = 0;
+    for (const g of B) {
+      const c = map.get(g) || 0;
+      if (c > 0) { inter++; map.set(g, c - 1); }
+    }
+    return (2 * inter) / (A.length + B.length);
+  }
+
+  function findBestKoKey(normKo, koKeys, threshold = 0.88) {
+    if (!normKo) return { key: "", score: 0 };
+
+    for (const k of koKeys) {
+      if (!k) continue;
+      if (k.includes(normKo) || normKo.includes(k)) {
+        const score = 0.95;
+        if (score >= threshold) return { key: k, score };
+      }
+    }
+
+    let bestK = "";
+    let bestS = 0;
+    for (const k of koKeys) {
+      const s = diceSim(normKo, k);
+      if (s > bestS) { bestS = s; bestK = k; }
+    }
+    if (bestS >= threshold) return { key: bestK, score: bestS };
+    return { key: "", score: bestS };
+  }
+
+  function matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, threshold) {
+    const n1 = normalizeKo(koBodyRaw);
+    let jp = n1 ? (ko2jp.get(n1) || "") : "";
+    let special = "";
+    let usedKey = "";
+    let score = 0;
+    let kind = "";
+
+    let n2 = "";
+
+    if (jp) {
+      usedKey = n1;
+      score = 1;
+      kind = "EXACT";
+      return { jp, special: "EXACT", usedKey, score, kind };
+    }
+
+    n2 = normalizeKo(cleanKoKey(koBodyRaw));
+    if (n2) {
+      jp = ko2jp.get(n2) || "";
+      if (jp) {
+        usedKey = n2;
+        score = 1;
+        kind = "EXACT";
+        return { jp, special: "EXACT", usedKey, score, kind };
+      }
+    }
+
+    const base = n2 || n1;
+    const best = findBestKoKey(base, koKeys, threshold);
+    if (best.key) {
+      jp = ko2jp.get(best.key) || "";
+      usedKey = best.key;
+      score = best.score;
+      kind = "FUZZY";
+      special = `FUZZY ${best.score.toFixed(2)}`;
+      return { jp, special, usedKey, score, kind };
+    }
+
+    return { jp: "", special: "", usedKey: "", score: 0, kind: "" };
+  }
+
+  // ===== DOCX: title/passage extraction (本文 줄 위가 제목) =====
+  function extractTitleAndPassage(docRaw) {
+    const lines = docRaw
+      .replace(/\r/g, "")
+      .split("\n")
+      .map(x => (x ?? "").trim())
+      .filter(x => x.length > 0);
+
+    let title = "";
+    let passage = "";
+
+    const isPassageLine = (s) => {
+      const t = (s || "").trim();
+      if (!t) return false;
+      return /^本[\s　]*文\b/.test(t);
+    };
+
+    const isTitleLabelLine = (s) => {
+      const t = (s || "").trim();
+      if (!t) return false;
+      return /^タイトル\b/.test(t);
+    };
+
+    const afterColon = (s) => {
+      const t = (s || "").trim();
+      const m = t.match(/^[^:：]*[:：]\s*(.*)$/);
+      if (m) return (m[1] || "").trim();
+      return "";
+    };
+
+    let passageIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (isPassageLine(lines[i])) {
+        const p = afterColon(lines[i]);
+        if (p) {
+          passage = p;
+          passageIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (passageIdx > 0) {
+      const prev = lines[passageIdx - 1].trim();
+      if (isTitleLabelLine(prev)) {
+        const t = afterColon(prev);
+        title = t ? t : prev;
+      } else {
+        title = prev;
+      }
+    }
+
+    if (!title) {
+      for (const ln of lines) {
+        if (isTitleLabelLine(ln)) {
+          const t = afterColon(ln);
+          if (t) { title = t; break; }
+        }
+      }
+    }
+
+    return { title, passage };
+  }
+
+  function extractManuscriptNumberedJP(docRaw) {
+    const lines = docRaw.replace(/\r/g, "").split("\n");
+    const map = new Map();
+
+    const numRe = /^(\d{1,3})\s*[.\uFF0E:)\]]?\s*(.+)?$/;
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw = (lines[i] ?? "");
+      const ln = raw.trim();
+      if (!ln) continue;
+
+      if (hasHangul(ln) && isOpeningMarker(ln)) break;
+      if (hasHangul(ln)) continue;
+
+      const m = ln.match(numRe);
+      if (!m) continue;
+
+      const num = Number(m[1]);
+      if (!(Number.isFinite(num) && num > 0)) continue;
+
+      if (map.has(num)) continue;
+
+      const rest0 = (m[2] || "").trim();
+
+      let buf = [];
+      if (rest0) {
+        if (!hasJapanese(rest0)) continue;
+        buf.push(rest0);
+      }
+
+      for (let j = i + 1; j < lines.length; j++) {
+        const nx = (lines[j] ?? "").trim();
+
+        if (!nx) continue;
+
+        if (hasHangul(nx) && isOpeningMarker(nx)) break;
+
+        if (!hasHangul(nx)) {
+          const nm = nx.match(numRe);
+          if (nm) {
+            const nextNum = Number(nm[1]);
+            if (Number.isFinite(nextNum) && nextNum !== num) break;
+            const r2 = (nm[2] || "").trim();
+            if (r2 && hasJapanese(r2)) buf.push(r2);
+            continue;
+          }
+        }
+
+        if (hasHangul(nx)) break;
+
+        if (hasJapanese(nx)) buf.push(nx);
+      }
+
+      if (!buf.length) continue;
+
+      const combined = `${num} ${buf.join("\n").trim()}`.trim();
+      map.set(num, combined);
+    }
+
+    return map;
+  }
+
+  // ===== KO->JP dict =====
+  function stripJpLabels(jpLines, dropOpeningLabel) {
+    const out = [];
+    for (let ln of jpLines) {
+      ln = (ln || "").trim();
+      if (!ln) continue;
+      if (dropOpeningLabel && /^\[オープニングコメント\]\s*:/i.test(ln)) continue;
+      out.push(ln);
+    }
+    return out.join("\n").trim();
+  }
+
+  function buildKoToJpMap(docText, dropOpeningLabel) {
+    const lines = docText.replace(/\r/g, "").split("\n").map(x => x.trim());
+    const map = new Map();
+
+    let currentKo = null;
+    let jpBuf = [];
+
+    function flush() {
+      if (!currentKo) return;
+      const koKey = normalizeKo(cleanKoKey(currentKo));
+      const jpText = stripJpLabels(jpBuf, dropOpeningLabel);
+      if (koKey && jpText) {
+        if (!map.has(koKey)) map.set(koKey, jpText);
+      }
+      currentKo = null;
+      jpBuf = [];
+    }
+
+    for (const ln of lines) {
+      if (!ln) continue;
+      if (hasHangul(ln)) { flush(); currentKo = ln; }
+      else { if (currentKo) jpBuf.push(ln); }
+    }
+    flush();
+    return map;
+  }
+
+  function removeBlankLinesAggressive(text) {
+    const lines = (text || "").replace(/\r/g, "").split("\n");
+    const out = [];
+    for (const ln of lines) {
+      const t = ln.trim();
+      if (!t) continue;
+      out.push(t);
+    }
+    return out.join("\n").trim();
+  }
+
+  function buildDocxViewLines(docRaw) {
+    const rawLines = docRaw.replace(/\r/g, "").split("\n").map(x => x.trimEnd());
+    const out = [];
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const cur = (rawLines[i] ?? "").trimEnd();
+      const trimmed = cur.trim();
+
+      if (!trimmed) {
+        const prev = (out.length ? out[out.length - 1] : "");
+        const next = (i + 1 < rawLines.length) ? (rawLines[i + 1] ?? "").trim() : "";
+
+        if (prev && next && hasJapanese(prev) && hasJapanese(next)) continue;
+        if (out.length && out[out.length - 1] === "") continue;
+
+        out.push("");
+        continue;
+      }
+
+      const prev = (out.length ? out[out.length - 1] : "");
+      if (hasHangul(trimmed) && prev && prev !== "" && hasJapanese(prev)) {
+        if (out[out.length - 1] !== "") out.push("");
+      }
+
+      out.push(trimmed);
+    }
+
+    while (out.length && out[out.length - 1] === "") out.pop();
+    return out.map(t => ({ text: t, isBlank: t === "" }));
+  }
+
+  function renderDocxView(lines) {
+    docxViewLines = lines;
+    docxView.innerHTML = "";
+    if (!lines || !lines.length) {
+      docxView.textContent = "(DOCX 내용이 없습니다)";
+      return;
+    }
+
+    lines.forEach((ln, idx) => {
+      if (ln.isBlank) {
+        const div = document.createElement("div");
+        div.className = "docBlank";
+        div.dataset.lineIndex = String(idx);
+        docxView.appendChild(div);
+        return;
+      }
+      const span = document.createElement("span");
+      span.className = "docLine";
+      span.dataset.lineIndex = String(idx);
+      span.textContent = ln.text;
+      docxView.appendChild(span);
+      docxView.appendChild(document.createTextNode("\n"));
+    });
+  }
+
+  function highlightInDocx(query) {
+    const q = (query || "").trim();
+    const all = docxView.querySelectorAll(".docLine");
+    all.forEach(el => el.classList.remove("selected"));
+    if (!q) return false;
+
+    let first = null;
+    all.forEach(el => {
+      if (first) return;
+      if ((el.textContent || "").includes(q)) first = el;
+    });
+
+    if (first) {
+      first.classList.add("selected");
+      first.scrollIntoView({ block: "center" });
+      return true;
+    }
+    return false;
+  }
+
+  function makeDocxAnchorFromKo(koRaw) {
+    const raw = (koRaw || "").trim();
+    if (!raw) return "";
+    const lines = raw.split("\n").map(s => s.trim()).filter(Boolean);
+    const hangulLines = lines.filter(hasHangul).map(cleanKoKey);
+    let bestLine = "";
+    for (const ln of hangulLines) if (ln.length > bestLine.length) bestLine = ln;
+    if (bestLine.length > 70) bestLine = bestLine.slice(0, 70);
+    bestLine = bestLine.replace(/[“”"]/g, "").trim();
+    return bestLine;
+  }
+
+  function rebuildOutSrtFromBlocks() {
+    const lines = [];
+    for (let i = 0; i < lastBlocks.length; i++) {
+      const b = lastBlocks[i];
+      const r = lastReport[i];
+      const edited = (r && typeof r.jpEdited === "string") ? r.jpEdited.trim() : "";
+      const body = edited ? edited : b.body;
+      lines.push(`${b.idx}\n${b.time}\n${body}`);
+    }
+    return lines.join("\n\n");
+  }
+
+  function refreshOkFailCounts() {
+    let ok = 0, fail = 0;
+    for (const r of lastReport) {
+      if (r.ok) ok++; else fail++;
+    }
+    leftStat.textContent = `OK ${ok} / FAIL ${fail}`;
+    setStatus(`변환 상태: <b>성공 ${ok}</b> / <b>실패 ${fail}</b> (치환칸 입력하면 자동 OK)`);
+  }
+
+  // ✅ 추가: 0.9 이상(정확 1.0 제외) 노랑 판단
+  function isNearMatchYellow(r) {
+    if (!r || !r.ok) return false;
+    // mergeWarn는 이미 노랑
+    if (r.mergeWarn) return false;
+    const sc = Number(r.score);
+    return Number.isFinite(sc) && sc >= 0.90 && sc < 1.0;
+  }
+
+  function updateRowUIByIndex(i) {
+    const tr = detailBody.querySelector(`tr[data-report-index="${i}"]`);
+    if (!tr) return;
+    const r = lastReport[i];
+    if (!r) return;
+
+    if (r.ok) tr.classList.remove("unmatched");
+    else tr.classList.add("unmatched");
+
+    if (r.mergeWarn) tr.classList.add("mergeWarn");
+    else tr.classList.remove("mergeWarn");
+
+    // ✅ 추가: nearWarn 토글
+    if (isNearMatchYellow(r)) tr.classList.add("nearWarn");
+    else tr.classList.remove("nearWarn");
+
+    const statTd = tr.querySelector("td.colStat");
+    if (!statTd) return;
+
+    const sub = r.special ? `<div class="mono" style="font-size:12px;color:#666;">${r.special}</div>` : "";
+    statTd.innerHTML = r.ok
+      ? `<span class="ok">OK</span>${sub}`
+      : `<span class="bad">FAIL</span>${sub}`;
+  }
+
+  function renderReport(report) {
+    detailBody.innerHTML = "";
+    lastReport = report;
+
+    for (let i = 0; i < report.length; i++) {
+      const r = report[i];
+      const tr = document.createElement("tr");
+      tr.classList.add("clickable");
+      if (!r.ok) tr.classList.add("unmatched");
+      if (r.mergeWarn) tr.classList.add("mergeWarn");
+      // ✅ 추가: 0.9 이상(정확 제외) 노랑
+      if (isNearMatchYellow(r)) tr.classList.add("nearWarn");
+
+      tr.dataset.reportIndex = String(i);
+
+      const jpInitial = r.jp || "";
+      r.jpEdited = jpInitial;
+
+      const specialSub = r.special ? `<div class="mono" style="font-size:12px;color:#666;">${r.special}</div>` : "";
+
+      tr.innerHTML = `
+        <td class="mono colIdx">${r.idx}</td>
+        <td class="mono colTime">${r.time}</td>
+        <td class="mono colKo">${r.ko || ""}</td>
+        <td class="colJp">
+          <textarea class="jpEdit ${r.ok ? "" : "fail"}"
+            data-jp-index="${i}" spellcheck="false"
+            placeholder="${r.ok ? "필요하면 일본어를 수정하세요" : "여기에 일본어를 직접 입력(FAIL 해결)"}">${jpInitial}</textarea>
+        </td>
+        <td class="colStat">
+          ${r.ok ? `<span class="ok">OK</span>${specialSub}` : `<span class="bad">FAIL</span>${specialSub}`}
+        </td>
+      `;
+      detailBody.appendChild(tr);
+    }
+
+    refreshOkFailCounts();
+  }
+
+  detailBody.addEventListener("focusin", (e) => {
+    const ta = e.target.closest("textarea.jpEdit");
+    if (!ta) return;
+    lastFocusedTextarea = ta;
+  });
+
+  detailBody.addEventListener("input", (e) => {
+    const ta = e.target.closest("textarea.jpEdit");
+    if (!ta) return;
+
+    const idx = Number(ta.dataset.jpIndex);
+    if (!Number.isFinite(idx) || !lastReport[idx]) return;
+
+    lastReport[idx].jpEdited = ta.value;
+
+    const hasText = (ta.value || "").trim().length > 0;
+    lastReport[idx].ok = hasText;
+
+    if (hasText) ta.classList.remove("fail");
+    else ta.classList.add("fail");
+
+    updateRowUIByIndex(idx);
+    refreshOkFailCounts();
+  });
+
+  detailBody.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    const idx = Number(tr.dataset.reportIndex);
+    const row = lastReport[idx];
+    if (!row) return;
+
+    const prev = detailBody.querySelector("tr.selectedRow");
+    if (prev) prev.classList.remove("selectedRow");
+    tr.classList.add("selectedRow");
+
+    const anchor = makeDocxAnchorFromKo(row.ko);
+    if (!anchor) return;
+    docFind.value = anchor;
+    highlightInDocx(anchor);
+  });
+
+  function insertToFocusedTextarea(text) {
+    if (!lastFocusedTextarea) {
+      setStatus(`<span style="color:#c00;font-weight:900;">주의:</span> 먼저 왼쪽 표에서 일본어 수정칸을 한 번 클릭해 주세요.`);
+      return;
+    }
+    const cleaned = removeBlankLinesAggressive(text);
+    if (!cleaned) return;
+
+    const cur = lastFocusedTextarea.value || "";
+    const nextVal = cur.trim() ? (cur.replace(/\s+$/,"") + "\n" + cleaned) : cleaned;
+
+    lastFocusedTextarea.value = nextVal;
+
+    const idx = Number(lastFocusedTextarea.dataset.jpIndex);
+    if (Number.isFinite(idx) && lastReport[idx]) {
+      lastReport[idx].jpEdited = nextVal;
+      const hasText = nextVal.trim().length > 0;
+      lastReport[idx].ok = hasText;
+      if (hasText) lastFocusedTextarea.classList.remove("fail");
+      else lastFocusedTextarea.classList.add("fail");
+      updateRowUIByIndex(idx);
+      refreshOkFailCounts();
+    }
+
+    lastFocusedTextarea.focus();
+    lastFocusedTextarea.selectionStart = lastFocusedTextarea.selectionEnd = lastFocusedTextarea.value.length;
+  }
+
+  docxView.addEventListener("click", (e) => {
+    const lineEl = e.target.closest(".docLine");
+    if (!lineEl) return;
+    const text = (lineEl.textContent || "").trim();
+    if (!text) return;
+    insertToFocusedTextarea(text);
+  });
+
+  function convertAll_SrtTimingFixed(srtItems, ko2jp, koKeys) {
+    const out = [];
+    const report = [];
+    let srtOpeningSeen = false;
+
+    for (let i = 0; i < srtItems.length; i++) {
+      const item = srtItems[i];
+      const koBodyRaw = (item.body || "").trim();
+
+      if (isOpeningMarker(koBodyRaw)) srtOpeningSeen = true;
+
+      // (0) verse 우선 (예: "10절 ...")
+      const verse = extractVerseNumberFromKo(koBodyRaw);
+      if (verse != null && docManuscriptMap.has(verse)) {
+        const jp = docManuscriptMap.get(verse) || "";
+        out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
+        report.push({
+          idx: item.idx, time: item.time, ko: koBodyRaw,
+          jp: jp || "", ok: !!jp,
+          mergeWarn: false,
+          score: jp ? 1 : 0,                 /* ✅ 추가 */
+          special: jp ? `VERSE ${verse}` : "FAIL"
+        });
+        continue;
+      }
+
+      // (A) 제목
+      if (isTitleMarker(koBodyRaw)) {
+        const title = (docTitleExtract.title || "").trim();
+        const passage = (docTitleExtract.passage || "").trim();
+        const jp = [title, passage].filter(Boolean).join("\n").trim();
+
+        out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
+        report.push({
+          idx: item.idx, time: item.time, ko: koBodyRaw,
+          jp: jp || "", ok: !!jp,
+          mergeWarn: false,
+          score: jp ? 1 : 0,                 /* ✅ 추가 */
+          special: "TITLE"
+        });
+        continue;
+      }
+
+      // (B) 숫자만: 오프닝 전까지만 원고 숫자 대체
+      if (!srtOpeningSeen && isNumericOnlyBody(koBodyRaw)) {
+        const num = Number(koBodyRaw);
+        const jp = docManuscriptMap.get(num) || "";
+
+        out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
+        report.push({
+          idx: item.idx, time: item.time, ko: koBodyRaw,
+          jp: jp || "", ok: !!jp,
+          mergeWarn: false,
+          score: jp ? 1 : 0,                 /* ✅ 추가 */
+          special: "NUM"
+        });
+        continue;
+      }
+
+      // (C) 일반 매칭
+      let jp = "";
+      let special = "";
+      let mergeWarn = false;
+      let score = 0;                         /* ✅ 추가 */
+
+      const mCur = matchKoToJpWithFuzzy(koBodyRaw, ko2jp, koKeys, 0.88);
+      jp = mCur.jp || "";
+      if (jp) {
+        special = mCur.special || "OK";
+        score = mCur.score || 0;            /* ✅ 추가 */
+      }
+
+      // (D) MERGE+NEXT
+      if (!jp && (i + 1) < srtItems.length) {
+        const nextItem = srtItems[i + 1];
+        const nextKo = (nextItem.body || "").trim();
+
+        if (isMergeCandidateBody(koBodyRaw) && isMergeCandidateBody(nextKo)) {
+          const combinedKo = `${koBodyRaw} ${nextKo}`;
+
+          const mCombined = matchKoToJpWithFuzzy(combinedKo, ko2jp, koKeys, 0.95);
+          if (mCombined.jp) {
+            const mNextStrong = matchKoToJpWithFuzzy(nextKo, ko2jp, koKeys, 0.95);
+
+            const nextKey = mNextStrong.usedKey || "";
+            const combinedKey = mCombined.usedKey || "";
+
+            if (combinedKey && nextKey && combinedKey === nextKey) {
+              // 병합 금지
+            } else {
+              const jpParts = [];
+              jpParts.push(mCombined.jp);
+
+              if (mNextStrong.jp && mNextStrong.jp !== mCombined.jp) {
+                jpParts.push(mNextStrong.jp);
+              }
+
+              jp = removeBlankLinesAggressive(jpParts.join("\n"));
+              mergeWarn = true;
+              special = `MERGE+NEXT ${mCombined.special || "OK"}`;
+              score = mCombined.score || 0; /* ✅ 추가: 병합은 combined score */
+            }
+          }
+        }
+      }
+
+      out.push({ idx: item.idx, time: item.time, body: jp || koBodyRaw });
+      report.push({
+        idx: item.idx, time: item.time, ko: koBodyRaw,
+        jp: jp || "", ok: !!jp,
+        mergeWarn,
+        score: jp ? (score || 0) : 0,        /* ✅ 추가 */
+        special: jp ? (special || "") : "FAIL"
+      });
+    }
+
+    return { out, report };
+  }
+
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  async function loadSrtFromFile(file) {
+    const text = await file.text();
+    srtText = text;
+    srtFileNameBase = computeSrtBaseName(file.name);
+
+    upsertRecent(recent.srt, { name: file.name, text });
+    refreshRecentSelects();
+
+    setStatus(`SRT 로드됨: <b>${file.name}</b> → 저장명: <b>${srtFileNameBase}_jp.srt</b>`);
+    updateRunBtn();
+  }
+
+  async function loadDocxFromFile(file) {
+    const arrBuf = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer: arrBuf });
+
+    docxTextRaw = (result.value || "").trim();
+
+    upsertRecent(recent.docx, { name: file.name, text: docxTextRaw });
+    refreshRecentSelects();
+
+    docTitleExtract = extractTitleAndPassage(docxTextRaw);
+    docManuscriptMap = extractManuscriptNumberedJP(docxTextRaw);
+
+    const lines = buildDocxViewLines(docxTextRaw);
+    renderDocxView(lines);
+
+    findBtn.disabled = docxTextRaw.length === 0;
+    clearFindBtn.disabled = docxTextRaw.length === 0;
+
+    setStatus(
+      `DOCX 로드됨: <b>${file.name}</b> (タイトル:${docTitleExtract.title ? "OK" : "NO"} / 本文:${docTitleExtract.passage ? "OK" : "NO"} / 원고숫자:${docManuscriptMap.size}개)`
+    );
+    updateRunBtn();
+  }
+
+  $("srtFile").addEventListener("change", async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    await loadSrtFromFile(f);
+  });
+
+  $("docxFile").addEventListener("change", async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    await loadDocxFromFile(f);
+  });
+
+  recentSrtSel.addEventListener("change", () => {
+    const v = recentSrtSel.value;
+    if (v === "") return;
+    const item = recent.srt[Number(v)];
+    if (!item) return;
+
+    srtText = item.text;
+    srtFileNameBase = computeSrtBaseName(item.name);
+
+    setStatus(`최근 SRT 선택: <b>${item.name}</b> → 저장명: <b>${srtFileNameBase}_jp.srt</b>`);
+    updateRunBtn();
+  });
+
+  recentDocxSel.addEventListener("change", () => {
+    const v = recentDocxSel.value;
+    if (v === "") return;
+    const item = recent.docx[Number(v)];
+    if (!item) return;
+
+    docxTextRaw = item.text;
+
+    docTitleExtract = extractTitleAndPassage(docxTextRaw);
+    docManuscriptMap = extractManuscriptNumberedJP(docxTextRaw);
+
+    const lines = buildDocxViewLines(docxTextRaw);
+    renderDocxView(lines);
+
+    findBtn.disabled = docxTextRaw.length === 0;
+    clearFindBtn.disabled = docxTextRaw.length === 0;
+
+    setStatus(
+      `최근 DOCX 선택: <b>${item.name}</b> (タイトル:${docTitleExtract.title ? "OK" : "NO"} / 本文:${docTitleExtract.passage ? "OK" : "NO"} / 원고숫자:${docManuscriptMap.size}개)`
+    );
+    updateRunBtn();
+  });
+
+  function handleDropFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    for (const f of files) {
+      const name = (f.name || "").toLowerCase();
+      if (name.endsWith(".srt")) loadSrtFromFile(f);
+      else if (name.endsWith(".docx")) loadDocxFromFile(f);
     }
   }
-  return t.replace(/\s+$/g, "");
-}
 
-// 같은 문장 반복 방지 키
-function lineKey(s){
-  let t = normalizeSpaces(s);
-  t = t.replace(/[“”"']/g, "");
-  t = t.replace(/\s*([,?.!…])\s*/g, "$1");
-  t = t.replace(/[.?!…]+$/g, ".");
-  return t;
-}
+  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    handleDropFiles(e.dataTransfer.files);
+  });
 
-/* 시작/중지 */
-function startRecognition(){
-  try {
-    recognition.start();
-    recognizing = true;
-    shouldAutoRestart = true;
-    setMicUI(true);
-  } catch (e) {
-    console.warn("startRecognition error:", e);
-  }
-}
-function stopRecognition(){
-  shouldAutoRestart = false;
-  try { recognition.stop(); } catch (e) { console.warn("stopRecognition error:", e); }
-  recognizing = false;
-  setMicUI(false);
-  liveTextEl.textContent = ""; // 진행중 비우기
-}
-micButton.addEventListener("click", () => {
-  if (!recognizing) startRecognition();
-  else stopRecognition();
-});
+  dropzone.addEventListener("click", () => {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.multiple = true;
+    picker.accept = ".srt,.docx";
+    picker.onchange = () => handleDropFiles(picker.files);
+    picker.click();
+  });
 
-/* ✅ 결과 처리
-   - interim: liveTextEl에 “덮어쓰기”로 표시
-   - final: output에 누적 (중복이면 스킵)
-*/
-recognition.onresult = (event) => {
-  let interim = "";
-  for (let i = event.resultIndex; i < event.results.length; i++){
-    const res = event.results[i];
-    const raw = res[0].transcript;
+  $("findBtn").addEventListener("click", () => highlightInDocx(docFind.value));
+  $("clearFindBtn").addEventListener("click", () => {
+    docFind.value = "";
+    const all = docxView.querySelectorAll(".docLine");
+    all.forEach(el => el.classList.remove("selected"));
+  });
 
-    if (res.isFinal) {
-      const processed = applyPunctuationToFinal(raw);
-      if (!processed) continue;
+  runBtn.addEventListener("click", () => {
+    try {
+      const srtItems = parseSrt(srtText);
+      const dropOpeningLabel = $("dropOpeningLabel").checked;
+      const ko2jp = buildKoToJpMap(docxTextRaw, dropOpeningLabel);
+      const koKeys = Array.from(ko2jp.keys());
 
-      const k = lineKey(processed);
-      if (k && k === lastLineKey) continue;
-      lastLineKey = k;
+      setStatus(`처리 중... (SRT <b>${srtItems.length}</b> / KO→JP 사전 <b>${ko2jp.size}</b> / 원고숫자 <b>${docManuscriptMap.size}</b>)`);
 
-      finalText += processed + "\n";
-      output.value = finalText;
-      output.scrollTop = output.scrollHeight;
+      const { out, report } = convertAll_SrtTimingFixed(srtItems, ko2jp, koKeys);
 
-      liveTextEl.textContent = ""; // final 나오면 진행중은 비움
-    } else {
-      interim = raw; // 마지막 interim만
+      lastBlocks = out;
+      renderReport(report);
+
+      dlBtn.disabled = false;
+    } catch (err) {
+      console.error(err);
+      setStatus(`<span style="color:#c00;font-weight:900;">오류:</span> ${(err?.message || String(err))}`);
     }
-  }
+  });
 
-  // ✅ 진행중 문장 표시(덮어쓰기)
-  liveTextEl.textContent = interim ? normalizeSpaces(interim) : "";
-};
+  dlBtn.addEventListener("click", () => {
+    const content = rebuildOutSrtFromBlocks();
+    if (!content.trim()) return;
+    downloadText(`${srtFileNameBase}_jp.srt`, content);
+  });
 
-/* 자동 재시작 */
-recognition.onend = () => {
-  if (shouldAutoRestart) {
-    setTimeout(() => { try { recognition.start(); } catch(e){} }, 80);
-  } else {
-    setMicUI(false);
-  }
-};
-
-/* 오류 */
-recognition.onerror = (event) => {
-  console.error("음성 인식 오류:", event.error);
-  if (event.error === "no-speech" || event.error === "aborted") return;
-
-  shouldAutoRestart = false;
-  recognizing = false;
-  setMicUI(false);
-  liveTextEl.textContent = "";
-};
-
-/* 복사 */
-copyButton.addEventListener("click", async () => {
-  const textOnly = copyFinalOnlyEl.checked ? finalText : (finalText + (liveTextEl.textContent ? liveTextEl.textContent : ""));
-  try {
-    await navigator.clipboard.writeText(textOnly);
-    copyAlert.style.display = "flex";
-    setTimeout(() => { copyAlert.style.display = "none"; }, 1200);
-  } catch (err) {
-    alert("복사 실패: 브라우저 권한을 확인하세요.");
-  }
-});
-
-/* 내용 지우기 */
-clearButton.addEventListener("click", () => {
-  finalText = "";
-  lastLineKey = "";
-  output.value = "";
-  output.scrollTop = 0;
-  liveTextEl.textContent = "";
-});
-
-/* 정리 */
-window.addEventListener("beforeunload", () => {
-  try { recognition.abort(); } catch(e){}
-});
+})();
 </script>
-
 </body>
 </html>
