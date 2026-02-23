@@ -582,105 +582,41 @@ function isTitleMarker(body) {
     return { jp: "", special: "", usedKey: "", score: 0, kind: "" };
   }
 
-// ===== DOCX: title/passage extraction (本文 기준으로 위쪽에서 タイトル 찾아서 추출) =====
+// ===== DOCX: 일본어(タイトル/本文)만 추출 =====
 function extractTitleAndPassage(docRaw) {
-  // 1) 줄 정리: "원고 맨 위 ~ 15줄 이내"를 non-empty 기준으로 잡음
-  const all = (docRaw || "")
+  const lines = (docRaw || "")
     .replace(/\r/g, "")
     .split("\n")
-    .map(s => (s ?? "").trim());
-
-  const nonEmpty = all.filter(s => s.length > 0);
-  const head = nonEmpty.slice(0, 15); // ✅ 상단 15줄(비어있는 줄 제외)
+    .map(s => (s ?? "").trim())
+    .filter(s => s.length > 0)
+    .slice(0, 80); // ✅ 원고 상단 80줄 내에서만 탐색(필요하면 120으로 올려도 됨)
 
   let title = "";
   let passage = "";
 
-  const isPassageLine = (s) => {
-    const t = (s || "").trim();
-    if (!t) return false;
-    // 本文 / 本　　文 / 本 文 등 허용
-    return /^本[\s　]*文\b/.test(t);
-  };
-
-  const isTitleLine = (s) => {
-    const t = (s || "").trim();
-    if (!t) return false;
-    return /^タイトル\b/.test(t);
-  };
-
-  const isDateLikeLine = (s) => {
-    const t = (s || "").trim();
-    if (!t) return false;
-    // 日付/日時/日 付 등 날짜 라벨은 제목 후보에서 제외
-    return /^日[\s　]*付\b/.test(t) || /^日[\s　]*時\b/.test(t);
-  };
-
+  // ":" 또는 "：" 모두 처리
   const afterColon = (s) => {
-    const t = (s || "").trim();
-    // ":" 또는 "：" 모두 처리
-    const m = t.match(/^[^:：]*[:：]\s*(.*)$/);
+    const m = (s || "").match(/^[^:：]*[:：]\s*(.*)$/);
     return m ? (m[1] || "").trim() : "";
   };
 
-  // 2) head(상단 15줄) 안에서 本文 찾기
-  let passageIdx = -1;
-  for (let i = 0; i < head.length; i++) {
-    if (isPassageLine(head[i])) {
-      const p = afterColon(head[i]);
-      if (p) passage = p;
-      passageIdx = i;
-      break;
+  // 일본어 라벨만: タイトル / 本文 (공백, 전각공백 허용)
+  const isJpTitleLine = (s) => /^タイトル[\s　]*[:：]/.test(s);
+  const isJpPassageLine = (s) => /^本[\s　]*文[\s　]*[:：]/.test(s);
+
+  // 1) 타이틀 먼저 찾기
+  for (const ln of lines) {
+    if (isJpTitleLine(ln)) {
+      const t = afterColon(ln);
+      if (t) { title = t; break; }
     }
   }
 
-  // 3) 本文을 찾았으면, 그 위에서 タイトル 라인을 "위로 올라가며" 탐색
-  if (passageIdx >= 0) {
-    for (let i = passageIdx - 1; i >= 0; i--) {
-      const ln = head[i];
-      if (isTitleLine(ln)) {
-        const t = afterColon(ln);
-        if (t) { title = t; break; }
-      }
-    }
-
-    // 4) タイトル 라인이 없을 때만 "fallback":
-    //    본문 위에서 날짜/본문 라벨 제외하고 가장 그럴듯한 콜론 라인을 제목으로
-    if (!title) {
-      for (let i = passageIdx - 1; i >= 0; i--) {
-        const ln = head[i];
-        if (!ln) continue;
-        if (isPassageLine(ln)) continue;
-        if (isDateLikeLine(ln)) continue;
-
-        const t = afterColon(ln);
-        if (t) { title = t; break; }
-
-        // 콜론이 없는 경우라도 마지막 비어있지 않은 줄을 후보로
-        if (!ln.includes(":") && !ln.includes("：")) {
-          title = ln.trim();
-          break;
-        }
-      }
-    }
-  }
-
-  // 5) 본문을 못 찾았으면(예외) 기존처럼 タイトル/本文 각각 따로라도 찾아줌
-  if (!passage) {
-    for (const ln of head) {
-      if (isPassageLine(ln)) {
-        const p = afterColon(ln);
-        if (p) { passage = p; break; }
-      }
-    }
-  }
-
-  if (!title) {
-    for (const ln of head) {
-      if (isTitleLine(ln)) {
-        const t = afterColon(ln);
-        if (t) { title = t; break; }
-      }
+  // 2) 본문(성경구절) 찾기
+  for (const ln of lines) {
+    if (isJpPassageLine(ln)) {
+      const p = afterColon(ln);
+      if (p) { passage = p; break; }
     }
   }
 
