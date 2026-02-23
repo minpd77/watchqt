@@ -407,9 +407,22 @@
     return /^[0-9\s=+\-*/().,:;]+$/.test(s);
   }
 
-  function isTitleMarker(body) {
-    return (body || "").replace(/\s+/g, "").trim() === "제목";
-  }
+function isTitleMarker(body) {
+  const s = (body || "").trim();
+  const compact = s.replace(/\s+/g, "");
+
+  // 1) 가장 기본: 제목
+  if (compact === "제목") return true;
+
+  // 2) 흔한 변형들: [제목], 제목:, 제목 ：
+  if (/^\[?제목\]?\s*[:：]?\s*$/.test(s)) return true;
+
+  // 3) 혹시 SRT에 일본어로 들어오는 경우: タイトル, title
+  if (/^\[?タイトル\]?\s*[:：]?\s*$/.test(s)) return true;
+  if (/^\[?title\]?\s*[:：]?\s*$/i.test(s)) return true;
+
+  return false;
+}
 
   function isOpeningMarker(body) {
     const s = (body || "").trim();
