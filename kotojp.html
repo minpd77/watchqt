@@ -1129,6 +1129,20 @@
     return text.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
   }
 
+  function normalizeWordBreaks(text) {
+    return (text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\u000B/g, "\n")
+      .replace(/\u2028/g, "\n")
+      .replace(/\u2029/g, "\n")
+      .replace(/[↵⏎⮐⤶⤷↓]/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
   function looksReadableText(text) {
     const t = (text || "").trim();
     if (!t) return false;
@@ -1143,7 +1157,7 @@
     if (name.endsWith(".docx")) {
       const arrBuf = await file.arrayBuffer();
       const result = await mammoth.extractRawText({ arrayBuffer: arrBuf });
-      return (result.value || "").trim();
+      return normalizeWordBreaks(result.value || "");
     }
 
     if (name.endsWith(".doc")) {
@@ -1172,7 +1186,7 @@
         throw new Error("이 .doc 파일은 브라우저에서 해석되지 않는 형식입니다. .docx로 저장 후 사용해 주세요.");
       }
 
-      return plain;
+      return normalizeWordBreaks(plain);
     }
 
     throw new Error("지원하지 않는 Word 형식입니다. .docx 또는 .doc 파일만 가능합니다.");
